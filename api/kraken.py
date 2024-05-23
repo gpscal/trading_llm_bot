@@ -49,12 +49,24 @@ async def get_balance():
         logger.error(f"Error fetching balance: {str(e)}")
         return {'error': [str(e)]}
 
+@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def get_historical_data(pair, interval):
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            data = await response.json()
-            if data['error']:
-                print(f"Error fetching historical data: {data['error']}")
+            try:
+                data = await response.json()
+                response.raise_for_status()
+                if 'error' in data and data['error']:
+                    logger.error(f"Error fetching historical data: {data['error']}")
+                    return None
+                return data['result'].get(pair)
+            except aiohttp.ClientError as e:
+                logger.error(f"Client error: {str(e)}")
                 return None
-            return data['result'][pair]
+            except aiohttp.ServerError as e:
+                logger.error(f"Server error: {str(e)}")
+                return None
+            except Exception as e:
+                logger.error(f"Unexpected error: {str(e)}")
+                return None

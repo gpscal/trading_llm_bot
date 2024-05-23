@@ -121,12 +121,12 @@ def calculate_confidence(btc_indicators, sol_indicators, btc_momentum):
     confidence = 0.0
     
     indicator_weights = {
-        'macd': 0.3,  # MACD is a strong momentum indicator
-        'rsi': 0.2,  # RSI helps identify overbought/oversold conditions
-        'moving_avg': 0.2,  # Moving average is useful for trend identification
-        'stochastic_oscillator': 0.1,  # Stochastic oscillator confirms momentum changes
-        'atr': 0.1,  # ATR is useful for measuring market volatility
-        'btc_momentum': 0.1  # BTC momentum provides direct momentum insight
+        'macd': 0.5,  # MACD is a strong momentum indicator
+        'rsi': 0.3,  # RSI helps identify overbought/oversold conditions
+        'moving_avg': 0.3,  # Moving average is useful for trend identification
+        'stochastic_oscillator': 0.2,  # Stochastic oscillator confirms momentum changes
+        'atr': 0.2,  # ATR is useful for measuring market volatility
+        'btc_momentum': 0.3  # BTC momentum provides direct momentum insight
     }
     
     macd_condition = (btc_indicators['macd'][0] < btc_indicators['macd'][1]) and (sol_indicators['macd'][0] < sol_indicators['macd'][1])

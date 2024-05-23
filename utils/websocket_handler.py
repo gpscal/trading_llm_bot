@@ -1,5 +1,3 @@
-# utils/websocket_handler.py
-
 import numpy as np
 from colorama import Fore
 from utils.utils import get_timestamp, print_status
