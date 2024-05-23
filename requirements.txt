@@ -1,0 +1,6 @@
+aiohttp
+websockets
+requests
+numpy
+python-dotenv
+tenacity
