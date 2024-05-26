@@ -1,75 +1,89 @@
 import numpy as np
-from colorama import Fore
-from utils.utils import get_timestamp, print_status
+from colorama import Fore, Style
+from utils.utils import get_timestamp, log_and_print_status
 from strategies.indicators import calculate_indicators
 from api.kraken import get_historical_data
 from trade.trade_logic import handle_trade_with_fees
+from config.config import CONFIG
+import asyncio
+import logging
 
-# Initialize global variables
-balance = {
-    'usdt': 1000,
-    'sol': 10,
-    'sol_price': None,  # Initialize without a specific price
-    'btc_price': None,
-    'btc_momentum': 0.0,
-    'confidence': 0.0,
-    'initial_total_usd': 2784.3  # Example initial total USD value; should be set dynamically
-}
-btc_previous_price = None
-last_sol_price = None
-last_trade_time = 0
+# Set up logger
+logger = logging.getLogger('websocket_handler_logger')
+logger.setLevel(logging.INFO)
+handler = logging.FileHandler('websocket_handler.log')
+handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+logger.addHandler(handler)
 
-async def handle_websocket_data(message):
-    global btc_previous_price, last_sol_price, last_trade_time, balance
+async def handle_websocket_data(message, balance):
+    if isinstance(message, dict) and 'event' in message:
+        if message['event'] == 'subscriptionStatus' and message['status'] == 'subscribed':
+            logger.info(f"Subscribed to {message['pair']}")
+        elif message['event'] == 'systemStatus':
+            logger.info(f"System status: {message['status']}")
+    elif isinstance(message, list) and len(message) == 4:
+        channel_id, data, event_type, pair = message
+        if event_type == 'ticker':
+            if pair == 'XBT/USD':
+                btc_price = float(data['c'][0])
+                balance['btc_price'] = btc_price
+                balance['btc_indicators'] = {
+                    'moving_avg': np.mean([float(data['v'][0]), float(data['v'][1])]),
+                    'bollinger_bands': (max(float(data['h'][0]), float(data['h'][1])), min(float(data['l'][0]), float(data['l'][1]))),
+                    'macd': (float(data['p'][0]), float(data['p'][1])),
+                    'rsi': 50,
+                    'atr': np.array([float(data['h'][0]) - float(data['l'][0]), float(data['h'][1]) - float(data['l'][1])]),
+                    'correlation': 0.9,
+                    'stochastic_oscillator': 30,
+                    'momentum': -2000
+                }
+                logger.info(f"BTC price updated: {btc_price}")
+            elif pair == 'SOL/USD':
+                sol_price = float(data['c'][0])
+                balance['sol_price'] = sol_price
+                balance['sol_indicators'] = {
+                    'moving_avg': np.mean([float(data['v'][0]), float(data['v'][1])]),
+                    'bollinger_bands': (max(float(data['h'][0]), float(data['h'][1])), min(float(data['l'][0]), float(data['l'][1]))),
+                    'macd': (float(data['p'][0]), float(data['p'][1])),
+                    'rsi': 50,
+                    'atr': np.array([float(data['h'][0]) - float(data['l'][0]), float(data['h'][1]) - float(data['l'][1])]),
+                    'correlation': 0.9,
+                    'stochastic_oscillator': 30,
+                    'momentum': -2000
+                }
+                logger.info(f"SOL price updated: {sol_price}")
 
-    if isinstance(message, list):
-        channel_id, data, _, pair = message
+async def start_websocket(url, pairs, on_data, balance):
+    print(f"Connecting to websocket at {url}...")
+    logger.info(f"Connecting to websocket at {url}...")
+    try:
+        async with websockets.connect(url) as ws:
+            print(f"Connected to websocket at {url}. Subscribing to pairs {pairs}...")
+            logger.info(f"Connected to websocket at {url}. Subscribing to pairs {pairs}...")
 
-        btc_current_price = None
-        sol_current_price = None
+            subscribe_message = json.dumps({
+                "event": "subscribe",
+                "pair": pairs,
+                "subscription": {"name": "ticker"}
+            })
+            await ws.send(subscribe_message)
+            print(f"Sent subscription message: {subscribe_message}")
+            logger.info(f"Sent subscription message: {subscribe_message}")
 
-        if pair == 'XBT/USD':
-            btc_current_price = float(data['c'][0])
-            balance['btc_price'] = btc_current_price
-            if btc_previous_price is None:
-                btc_previous_price = btc_current_price
-        elif pair == 'SOL/USD':
-            sol_current_price = float(data['c'][0])
-            last_sol_price = sol_current_price
-            balance['sol_price'] = sol_current_price  # Update the current SOL price
-
-        if btc_current_price is None:
-            btc_current_price = btc_previous_price
-        if sol_current_price is None:
-            sol_current_price = last_sol_price
-
-        if btc_current_price is not None and sol_current_price is not None:
-            btc_historical = await get_historical_data('XXBTZUSD', 60)
-            sol_historical = await get_historical_data('SOLUSDT', 60)
-
-            if btc_historical and sol_historical:
-                btc_indicators, sol_indicators = calculate_indicators(btc_historical, sol_historical)
-
-                result = handle_trade_with_fees(
-                    btc_current_price, sol_current_price, btc_previous_price, balance['usdt'], balance['sol'], last_trade_time, btc_indicators, sol_indicators
-                )
-                balance['usdt'] = result['balance_usdt']
-                balance['sol'] = result['balance_sol']
-                balance['btc_momentum'] = result['btc_momentum']
-                balance['confidence'] = result['confidence']
-                btc_previous_price = result['btc_previous_price']
-                last_trade_time = result['last_trade_time']
-
-                current_total_usd = balance['usdt'] + balance['sol'] * balance['sol_price']
-                total_gain_usd = current_total_usd - balance['initial_total_usd']
-                print_status(get_timestamp(), btc_current_price, sol_current_price, result['btc_momentum'], result['confidence'], balance['usdt'], balance['sol'], current_total_usd, total_gain_usd)
-            else:
-                print(f"{Fore.RED}[{get_timestamp()}] Error fetching historical data.")
-    else:
-        event = message.get('event')
-        if event == 'heartbeat':
-            return
-        elif event == 'systemStatus' or event == 'subscriptionStatus':
-            print(f"{Fore.YELLOW}[{get_timestamp()}] WebSocket event: {message}")
-        else:
-            print(f"{Fore.RED}[{get_timestamp()}] Error processing websocket data: {message}")
+            while True:
+                try:
+                    data = await ws.recv()
+                    message = json.loads(data)
+                    await on_data(message, balance)
+                except websockets.ConnectionClosed:
+                    print(f"[{get_timestamp()}] WebSocket closed, reconnecting...")
+                    logger.warning(f"[{get_timestamp()}] WebSocket closed, reconnecting...")
+                    await asyncio.sleep(5)
+                    await start_websocket(url, pairs, on_data, balance)
+                except Exception as e:
+                    print(f"Error in WebSocket: {str(e)}")
+                    logger.error(f"Error in WebSocket: {str(e)}")
+                    await asyncio.sleep(5)
+    except Exception as e:
+        print(f"Failed to connect to websocket: {e}")
+        logger.error(f"Failed to connect to websocket: {e}")

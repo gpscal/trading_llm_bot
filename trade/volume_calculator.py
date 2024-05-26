@@ -1,2 +1,3 @@
 def calculate_volume(price, balance, config):
-    return min(config['max_volume'], balance / price)
+    volume = min(config['max_volume'], max(config['min_volume'], balance / price))
+    return volume
