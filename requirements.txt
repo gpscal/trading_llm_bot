@@ -1,0 +1,12 @@
+aiohttp
+websockets
+requests
+numpy
+python-dotenv
+tenacity
+flask
+flask-socketio
+streamlit
+pandas
+plotly
+colorama
