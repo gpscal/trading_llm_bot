@@ -4,7 +4,7 @@ import logging
 import json
 
 # Add import
-from utils.shared_state import bot_state, update_bot_state
+from utils.shared_state import append_log_safe
 from utils.alerts import notify
 
 def get_timestamp():
@@ -37,7 +37,7 @@ def log_and_print_status(balance, current_total_usd, total_gain_usd, trade_actio
         print(trade_message)
         logger.info(trade_message)
         # Append to shared logs
-        update_bot_state({"logs": bot_state.get('logs', []) + [trade_message]})
+        append_log_safe(trade_message)
         # Alerts
         notify(trade_message)
     
@@ -45,7 +45,7 @@ def log_and_print_status(balance, current_total_usd, total_gain_usd, trade_actio
         print(status_message)
         logger.info(status_message)
         # Append to shared logs
-        update_bot_state({"logs": bot_state.get('logs', []) + [status_message]})
+        append_log_safe(status_message)
 
 def log_trade(action, volume, price, balance_usdt, balance_sol):
     trade_log = {

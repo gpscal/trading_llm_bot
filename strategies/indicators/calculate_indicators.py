@@ -1,3 +1,5 @@
+from typing import Any, Dict, Iterable
+
 from .moving_average import calculate_moving_average
 from .bollinger_bands import calculate_bollinger_bands
 from .macd import calculate_macd
@@ -9,8 +11,32 @@ from .adx import calculate_adx
 from .obv import calculate_obv
 from .momentum import calculate_momentum
 
+
+def _to_python(value: Any) -> Any:
+    """Recursively convert numpy scalars/arrays to plain Python types."""
+
+    if hasattr(value, "item") and not isinstance(value, (bytes, str)):
+        try:
+            return value.item()
+        except ValueError:
+            # numpy arrays also expose .item but raise ValueError; fall through
+            pass
+
+    if hasattr(value, "tolist"):
+        return value.tolist()
+
+    if isinstance(value, Iterable) and not isinstance(value, (bytes, str, dict)):
+        return [_to_python(v) for v in value]
+
+    return value
+
+
+def _convert_dict(indicators: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: _to_python(val) for key, val in indicators.items()}
+
+
 def calculate_indicators(btc_historical, sol_historical):
-    btc_indicators = {
+    btc_indicators = _convert_dict({
         'moving_avg': calculate_moving_average(btc_historical),
         'bollinger_bands': calculate_bollinger_bands(btc_historical),
         'macd': calculate_macd(btc_historical),
@@ -21,8 +47,8 @@ def calculate_indicators(btc_historical, sol_historical):
         'momentum': calculate_momentum(btc_historical),
         'adx': calculate_adx(btc_historical),
         'obv': calculate_obv(btc_historical)
-    }
-    sol_indicators = {
+    })
+    sol_indicators = _convert_dict({
         'moving_avg': calculate_moving_average(sol_historical),
         'bollinger_bands': calculate_bollinger_bands(sol_historical),
         'macd': calculate_macd(sol_historical),
@@ -33,6 +59,6 @@ def calculate_indicators(btc_historical, sol_historical):
         'momentum': calculate_momentum(sol_historical),
         'adx': calculate_adx(sol_historical),
         'obv': calculate_obv(sol_historical)
-    }
+    })
 
     return btc_indicators, sol_indicators

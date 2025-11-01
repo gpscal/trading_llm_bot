@@ -21,7 +21,7 @@ async def common_trade_handler(ticker_fetcher, pairs, balance, btc_indicators, s
         balance['btc_price'] = btc_price
         balance['sol_price'] = sol_price
         balance['usdt'], balance['sol'], balance['last_trade_time'] = handle_trade_with_fees(
-            btc_price, sol_price, balance['usdt'], balance['sol'], balance['last_trade_time'], btc_indicators, sol_indicators, balance['sol_price'], balance['initial_total_usd']
+            btc_price, sol_price, balance['usdt'], balance['sol'], balance['last_trade_time'], btc_indicators, sol_indicators, balance['sol_price'], balance['initial_total_usd'], balance
         )
         current_total_usd = balance['usdt'] + balance['sol'] * sol_price
         total_gain_usd = current_total_usd - balance['initial_total_usd']

@@ -7,7 +7,7 @@ from utils.logger import setup_logger
 from utils.alerts import notify
 
 # Add import
-from utils.shared_state import bot_state, update_bot_state
+from utils.shared_state import append_log_safe
 
 logger = setup_logger('trade_logic_logger', 'trade_logic.log')
 
@@ -52,7 +52,7 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
                 balance_usdt, balance_sol = execute_trade('sell', volume_to_sell, sol_current_price, balance_usdt, balance_sol, trade_fee)
                 msg = f"[{get_timestamp()}] Max drawdown hit. Liquidated {pre_sol:.6f} SOL at {sol_current_price:.2f}. USDT {pre_usdt:.2f} -> {balance_usdt:.2f}"
                 logger.info(msg)
-                update_bot_state({"logs": bot_state.get('logs', []) + [msg]})
+                append_log_safe(msg)
                 notify(msg)
                 if balance is not None:
                     balance['position_entry_price'] = None
@@ -90,7 +90,7 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
         
         # Append to shared logs
         confidence_message = f"[{get_timestamp()}] Confidence: {confidence:.2f}"
-        update_bot_state({"logs": bot_state.get('logs', []) + [confidence_message]})
+        append_log_safe(confidence_message)
 
         if confidence < CONFIG['confidence_threshold']:
             logger.info(f"{get_timestamp()} Confidence too low. Skipping trade.")
@@ -125,7 +125,7 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
                         balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
                         msg = f"[{get_timestamp()}] Stop-loss triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
                         logger.info(msg)
-                        update_bot_state({"logs": bot_state.get('logs', []) + [msg]})
+                        append_log_safe(msg)
                         notify(msg)
                         balance['position_entry_price'] = None
                         balance['trailing_high_price'] = None
@@ -139,7 +139,7 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
                         balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
                         msg = f"[{get_timestamp()}] Take-profit triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
                         logger.info(msg)
-                        update_bot_state({"logs": bot_state.get('logs', []) + [msg]})
+                        append_log_safe(msg)
                         notify(msg)
                         balance['position_entry_price'] = None
                         balance['trailing_high_price'] = None
@@ -153,7 +153,7 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
                         balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
                         msg = f"[{get_timestamp()}] Trailing stop triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
                         logger.info(msg)
-                        update_bot_state({"logs": bot_state.get('logs', []) + [msg]})
+                        append_log_safe(msg)
                         notify(msg)
                         balance['position_entry_price'] = None
                         balance['trailing_high_price'] = None

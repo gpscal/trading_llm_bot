@@ -2,7 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, render_template
 from flask_socketio import SocketIO
 import threading
 from simulate import main as simulate_main
@@ -12,7 +12,7 @@ import numpy as np
 import json
 
 # Import shared state
-from utils.shared_state import bot_state, update_bot_state
+from utils.shared_state import bot_state, update_bot_state_safe, get_bot_state_safe, set_socketio_instance
 from utils.config_manager import load_profiles, save_profile, apply_profile, mask_value
 
 class NumpyEncoder(json.JSONEncoder):
@@ -30,40 +30,54 @@ class NumpyEncoder(json.JSONEncoder):
             return obj.item()
         return super().default(obj)
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='templates', static_folder='static')
 app.json_encoder = NumpyEncoder
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Update the update_bot_state function if needed, but since it's imported, it's fine
-# The imported update_bot_state should be modified to emit if necessary
+# Set socketio instance in shared_state module for WebSocket emits
+set_socketio_instance(socketio)
+
+# Route to serve dashboard HTML
+@app.route('/')
+@app.route('/dashboard')
+def dashboard():
+    return render_template('dashboard.html')
+
+# Static file serving is handled automatically by Flask via static_folder
 
 @app.route('/start_simulation', methods=['POST'])
 def start_simulation():
-    if not bot_state['running']:
+    state = get_bot_state_safe()
+    if not state['running']:
         data = request.json
         initial_usdt = data.get('initial_usdt', 1000)
         initial_sol = data.get('initial_sol', 10)
         threading.Thread(target=lambda: asyncio.run(simulate_main(initial_usdt, initial_sol))).start()
-        bot_state['running'] = True
-        bot_state['mode'] = 'simulation'
+        update_bot_state_safe({'running': True, 'mode': 'simulation'})
+        # Emit WebSocket update
+        socketio.emit('status_update', get_bot_state_safe())
         return jsonify({"status": "Simulation started"})
     return jsonify({"error": "Already running"}), 400
 
 @app.route('/start_live', methods=['POST'])
 def start_live():
-    if not bot_state['running']:
+    state = get_bot_state_safe()
+    if not state['running']:
         threading.Thread(target=lambda: asyncio.run(live_trade_main())).start()
-        bot_state['running'] = True
-        bot_state['mode'] = 'live'
+        update_bot_state_safe({'running': True, 'mode': 'live'})
+        # Emit WebSocket update
+        socketio.emit('status_update', get_bot_state_safe())
         return jsonify({"status": "Live trading started"})
     return jsonify({"error": "Already running"}), 400
 
 @app.route('/stop', methods=['POST'])
 def stop():
-    if bot_state['running']:
+    state = get_bot_state_safe()
+    if state['running']:
         # Note: Implement proper shutdown logic in bot code
-        bot_state['running'] = False
-        bot_state['mode'] = None
+        update_bot_state_safe({'running': False, 'mode': None})
+        # Emit WebSocket update
+        socketio.emit('status_update', get_bot_state_safe())
         return jsonify({"status": "Stopped"})
     return jsonify({"error": "Not running"}), 400
 
@@ -86,7 +100,7 @@ def get_status():
         else:
             return obj
 
-    serializable_state = convert_numpy_types(bot_state)
+    serializable_state = convert_numpy_types(get_bot_state_safe())
     return jsonify(serializable_state)
 
 @app.route('/profiles', methods=['GET'])
@@ -128,7 +142,13 @@ def apply_profile_route():
 
 @socketio.on('connect')
 def handle_connect():
-    socketio.emit('update', bot_state)
+    """Handle client WebSocket connection - send initial state"""
+    socketio.emit('status_update', get_bot_state_safe())
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client WebSocket disconnection"""
+    pass
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5000, allow_unsafe_werkzeug=True)

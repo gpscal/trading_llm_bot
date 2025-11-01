@@ -10,3 +10,6 @@ streamlit
 pandas
 plotly
 colorama
+pytest
+gunicorn
+eventlet

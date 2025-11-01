@@ -8,7 +8,7 @@ from trading_loop import trading_loop
 from config.config import CONFIG
 from utils.data_fetchers import fetch_initial_sol_price, fetch_and_analyze_historical_data
 import logging
-from utils.shared_state import update_bot_state, bot_state
+from utils.shared_state import update_bot_state_safe, get_bot_state_safe, append_log_safe
 
 # Set up logger
 logger = logging.getLogger('simulate_logger')
@@ -46,7 +46,7 @@ async def main(initial_balance_usdt, initial_balance_sol):
         balance['trailing_high_price'] = None
         
         # Update shared state
-        update_bot_state({"balance": balance})
+        update_bot_state_safe({"balance": balance})
         
         pairs = {
             'btc': 'XXBTZUSD',
@@ -58,8 +58,8 @@ async def main(initial_balance_usdt, initial_balance_sol):
         print("Initial historical data fetched and analyzed")
         
         # Update state again
-        update_bot_state({"indicators": {"btc": balance['btc_indicators'], "sol": balance['sol_indicators']}})
-        print("Debug: Updated indicators in bot_state:", bot_state.get('indicators'))
+        update_bot_state_safe({"indicators": {"btc": balance['btc_indicators'], "sol": balance['sol_indicators']}})
+        print("Debug: Updated indicators in bot_state:", get_bot_state_safe().get('indicators'))
         
         print("Starting websocket...")
         asyncio.create_task(start_websocket(
@@ -76,7 +76,7 @@ async def main(initial_balance_usdt, initial_balance_sol):
     except Exception as e:
         logger.error(f"Error in main: {e}")
         print(f"Error in main: {e}")
-        update_bot_state({"logs": bot_state['logs'] + [f"Error: {e}"]})
+        append_log_safe(f"Error: {e}")
 
 if __name__ == "__main__":
     args = parse_args()

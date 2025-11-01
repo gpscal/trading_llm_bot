@@ -1,0 +1,36 @@
+[Unit]
+Description=SolBot Trading Dashboard Service
+After=network.target
+
+[Service]
+Type=simple
+User=%USER%
+Group=%GROUP%
+WorkingDirectory=%PROJECT_ROOT%
+Environment="PATH=%VENV_BIN%:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=%PROJECT_ROOT%"
+# Load environment variables from .env file if it exists
+EnvironmentFile=-%PROJECT_ROOT%/.env
+
+# Gunicorn command
+ExecStart=%VENV_BIN%/gunicorn -c web/gunicorn.conf.py web.wsgi:application
+
+# Graceful reload
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=solbot
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+

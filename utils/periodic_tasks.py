@@ -2,7 +2,7 @@ import asyncio
 from colorama import Fore, Style
 from utils.logger import setup_logger
 from utils.utils import calculate_total_usd, calculate_total_gain_usd
-from utils.shared_state import update_bot_state, bot_state
+from utils.shared_state import append_log_safe
 
 logger = setup_logger('periodic_tasks', 'periodic_tasks.log')
 
@@ -22,6 +22,6 @@ async def print_status_periodically(balance):
         logger.info(status_message)
         
         # Update shared state
-        update_bot_state({"logs": bot_state['logs'] + [status_message]})
+        append_log_safe(status_message)
         
         await asyncio.sleep(60)  # Adjust the interval to control the logging frequency

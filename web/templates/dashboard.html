@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SolBot Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SolBot Dashboard</h1>
+            <div class="connection-status">
+                <span id="connection-indicator" class="status-badge disconnected">Disconnected</span>
+            </div>
+        </header>
+
+        <!-- Profiles Section -->
+        <section class="section">
+            <h2>Profiles</h2>
+            <div class="profiles-layout">
+                <div class="profiles-col">
+                    <h3>Create/Edit Profile</h3>
+                    <form id="profile-form">
+                        <div class="form-group">
+                            <label for="profile-name">Profile Name:</label>
+                            <input type="text" id="profile-name" name="profile-name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="api-key">Kraken API Key:</label>
+                            <input type="password" id="api-key" name="api-key">
+                        </div>
+                        <div class="form-group">
+                            <label for="api-secret">Kraken API Secret:</label>
+                            <input type="password" id="api-secret" name="api-secret">
+                        </div>
+                        <div class="form-group">
+                            <label for="slack-webhook">Slack Webhook URL:</label>
+                            <input type="password" id="slack-webhook" name="slack-webhook">
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-token">Telegram Bot Token:</label>
+                            <input type="password" id="telegram-token" name="telegram-token">
+                        </div>
+                        <div class="form-group">
+                            <label for="telegram-chat-id">Telegram Chat ID:</label>
+                            <input type="password" id="telegram-chat-id" name="telegram-chat-id">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Profile</button>
+                    </form>
+                </div>
+                <div class="profiles-col">
+                    <h3>Select Profile</h3>
+                    <div class="form-group">
+                        <label for="profile-select">Profile:</label>
+                        <select id="profile-select">
+                            <option value="">-- Select Profile --</option>
+                        </select>
+                    </div>
+                    <div id="profile-display" class="profile-display"></div>
+                    <button id="apply-profile-btn" class="btn btn-secondary" disabled>Apply Profile</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Control Panel -->
+        <section class="section">
+            <h2>Control Panel</h2>
+            <div class="control-panel">
+                <div class="control-group">
+                    <label for="initial-usdt">Initial USDT:</label>
+                    <input type="number" id="initial-usdt" value="1000.0" step="0.01">
+                </div>
+                <div class="control-group">
+                    <label for="initial-sol">Initial SOL:</label>
+                    <input type="number" id="initial-sol" value="10.0" step="0.01">
+                </div>
+                <div class="control-group">
+                    <button id="start-simulation-btn" class="btn btn-success">Start Simulation</button>
+                </div>
+                <div class="control-group">
+                    <button id="start-live-btn" class="btn btn-danger">Start Live Trading</button>
+                </div>
+                <div class="control-group">
+                    <button id="stop-btn" class="btn btn-warning">Stop</button>
+                </div>
+                <div class="control-group">
+                    <button id="manual-refresh-btn" class="btn btn-secondary">Refresh Now</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Status Display -->
+        <section class="section">
+            <h2>Current Status</h2>
+            <div id="status-display" class="status-display">Loading...</div>
+        </section>
+
+        <section class="section">
+            <h2>Current Balance</h2>
+            <div id="balance-display" class="status-display">Loading...</div>
+        </section>
+
+        <section class="section">
+            <h2>BTC Indicators</h2>
+            <div id="btc-indicators-display" class="status-display">Loading...</div>
+        </section>
+
+        <section class="section">
+            <h2>SOL Indicators</h2>
+            <div id="sol-indicators-display" class="status-display">Loading...</div>
+        </section>
+
+        <section class="section">
+            <h2>Recent Logs</h2>
+            <div id="logs-display" class="logs-display">Loading...</div>
+        </section>
+
+        <!-- Charts -->
+        <section class="section">
+            <h2>SOL Price Chart</h2>
+            <div id="price-chart" class="chart-container"></div>
+        </section>
+
+        <section class="section">
+            <h2>Equity Curve (USD)</h2>
+            <div id="equity-chart" class="chart-container"></div>
+        </section>
+
+        <section class="section">
+            <h2>Drawdown (%)</h2>
+            <div id="drawdown-chart" class="chart-container"></div>
+        </section>
+
+        <!-- TradingView-style Indicator Charts -->
+        <section class="section">
+            <h2>TradingView-style Indicator Charts</h2>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="sol-chart">SOL</button>
+                <button class="tab-btn" data-tab="btc-chart">BTC</button>
+            </div>
+            <div id="sol-chart" class="tab-content active">
+                <div id="sol-tv-chart" class="chart-container"></div>
+            </div>
+            <div id="btc-chart" class="tab-content">
+                <div id="btc-tv-chart" class="chart-container"></div>
+            </div>
+        </section>
+
+        <!-- Message Display -->
+        <div id="message-display" class="message-display"></div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
+

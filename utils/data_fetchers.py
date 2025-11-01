@@ -36,7 +36,11 @@ async def fetch_and_analyze_historical_data(pairs, balance):
             btc_indicators, sol_indicators = analyze_historical_data(btc_historical, sol_historical)
             logger.info(f"BTC Indicators: {btc_indicators}")
             logger.info(f"SOL Indicators: {sol_indicators}")
-        # Don't store indicators in balance since they're stored separately in bot_state
+
+            # Persist indicators on the shared balance state for downstream consumers
+            balance['btc_indicators'] = btc_indicators
+            balance['sol_indicators'] = sol_indicators
+
         # print("Historical data analyzed and indicators set")  
     except Exception as e:
         logger.error(f"Error in fetch_and_analyze_historical_data: {e}")
