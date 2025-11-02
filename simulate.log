@@ -266,3 +266,34 @@
 2024-05-25 22:42:05,713 ERROR Error in main: name 'fetch_initial_sol_price' is not defined
 2024-05-25 22:51:12,565 ERROR Error in main: handle_trade_with_fees() takes 9 positional arguments but 10 were given
 2024-05-25 22:51:58,489 ERROR Error in main: handle_trade_with_fees() takes 9 positional arguments but 10 were given
+2025-11-01 20:47:57,215 ERROR Error in main: unsupported operand type(s) for *: 'int' and 'NoneType'
+2025-11-01 20:54:13,355 ERROR Error in main: unsupported operand type(s) for *: 'int' and 'NoneType'
+2025-11-01 21:08:50,502 ERROR Failed to fetch initial SOL price. Retrying...
+2025-11-01 21:08:50,572 ERROR Failed to fetch SOL price after retry. Simulation cannot continue.
+2025-11-01 21:21:50,895 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:23:02,950 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:23:16,933 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:28:02,707 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:28:27,655 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:28:58,768 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:37:51,277 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:38:07,096 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:43:13,248 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:43:49,608 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=184.84, Total USD=2848.4
+2025-11-01 21:51:00,946 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.62, Total USD=2856.2
+2025-11-01 22:03:31,235 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.48, Total USD=2854.8
+2025-11-01 22:13:01,138 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.37, Total USD=2853.7
+2025-11-01 22:48:40,254 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.84, Total USD=2858.4
+2025-11-01 22:49:34,597 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=185.92, Total USD=1185.92
+2025-11-01 23:25:44,041 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.21, Total USD=1186.21
+2025-11-01 23:25:59,325 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.2, Total USD=1186.2
+2025-11-01 23:26:26,121 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.2, Total USD=1186.2
+2025-11-01 23:32:33,893 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.24, Total USD=1186.24
+2025-11-01 23:33:32,973 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=186.23, Total USD=2862.3
+2025-11-01 23:43:34,551 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=186.3, Total USD=2863.0
+2025-11-01 23:46:48,040 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=186.3, Total USD=2863.0
+2025-11-01 23:47:01,942 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.3, Total USD=1186.3
+2025-11-02 00:01:31,388 INFO Simulation starting with balance: USDT=1000, SOL=1, SOL Price=186.26, Total USD=1186.26
+2025-11-02 00:05:25,846 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.72, Total USD=2857.2
+2025-11-02 00:05:39,318 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.72, Total USD=2857.2
+2025-11-02 00:13:35,673 INFO Simulation starting with balance: USDT=1000, SOL=10, SOL Price=185.72, Total USD=2857.2

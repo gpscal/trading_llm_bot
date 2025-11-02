@@ -6,8 +6,9 @@ from trade.volume_calculator import calculate_volume
 from utils.logger import setup_logger
 from utils.alerts import notify
 
-# Add import
+# Add imports
 from utils.shared_state import append_log_safe
+# ML import is lazy-loaded to avoid circular dependencies
 
 logger = setup_logger('trade_logic_logger', 'trade_logic.log')
 
@@ -85,11 +86,65 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
             confidence += CONFIG['indicator_weights']['adx']
         if obv_condition:
             confidence += CONFIG['indicator_weights']['obv']
-
-        logger.info(f"Indicators - MACD: {btc_indicators['macd']}, {sol_indicators['macd']} | RSI: {btc_indicators['rsi']}, {sol_indicators['rsi']} | ADX: {btc_indicators.get('adx', 'N/A')}, {sol_indicators.get('adx', 'N/A')} | OBV: {btc_indicators['obv']}, {sol_indicators['obv']} | Confidence: {confidence:.2f}")
+        
+        # Add ML prediction if enabled
+        ml_confidence_boost = 0.0
+        ml_prediction = None
+        if CONFIG.get('ml_enabled', False):
+            try:
+                # Lazy import to avoid circular dependencies
+                from ml.ml_predictor_manager import get_ml_predictor_manager
+                ml_manager = get_ml_predictor_manager(
+                    CONFIG.get('ml_model_path', 'models/price_predictor.pth'),
+                    CONFIG.get('ml_use_gpu', True)
+                )
+                
+                # Get historical data for ML prediction
+                # Note: This is simplified - in production, maintain historical data cache
+                from api.kraken import get_historical_data
+                import asyncio
+                
+                # Fetch recent data for ML (we need at least 60 candles)
+                try:
+                    # Try to get historical data for ML
+                    # In production, this should be cached and updated incrementally
+                    sol_historical = None  # Will be fetched if needed
+                    btc_historical = None
+                    
+                    # For now, skip ML if we don't have historical data readily available
+                    # This will be improved in production with proper data caching
+                    ml_prediction = None
+                except Exception as e:
+                    logger.debug(f"ML prediction skipped (no historical data cache): {e}")
+                    ml_prediction = None
+                
+                if ml_prediction and ml_prediction['confidence'] >= CONFIG.get('ml_min_confidence', 0.6):
+                    # ML predicts same direction as indicators
+                    ml_direction = ml_prediction['direction']
+                    indicator_direction = 'up' if btc_indicators['momentum'] > 0 else 'down'
+                    
+                    if ml_direction == indicator_direction or ml_direction == 'hold':
+                        # ML confirms indicators, boost confidence
+                        ml_confidence_boost = ml_prediction['confidence'] * CONFIG.get('ml_confidence_weight', 0.3)
+                    elif ml_direction != indicator_direction:
+                        # ML contradicts indicators, reduce confidence
+                        ml_confidence_boost = -ml_prediction['confidence'] * CONFIG.get('ml_confidence_weight', 0.2)
+                    
+                    logger.info(f"ML Prediction - Direction: {ml_direction}, Confidence: {ml_prediction['confidence']:.2f}, Boost: {ml_confidence_boost:.2f}")
+                    append_log_safe(f"ML: {ml_direction} (confidence: {ml_prediction['confidence']:.2f})")
+                
+            except Exception as e:
+                logger.error(f"ML prediction error: {e}")
+        
+        # Add ML confidence boost
+        confidence += ml_confidence_boost
+        
+        logger.info(f"Indicators - MACD: {btc_indicators['macd']}, {sol_indicators['macd']} | RSI: {btc_indicators['rsi']}, {sol_indicators['rsi']} | ADX: {btc_indicators.get('adx', 'N/A')}, {sol_indicators.get('adx', 'N/A')} | OBV: {btc_indicators['obv']}, {sol_indicators['obv']} | ML Boost: {ml_confidence_boost:.2f} | Total Confidence: {confidence:.2f}")
         
         # Append to shared logs
         confidence_message = f"[{get_timestamp()}] Confidence: {confidence:.2f}"
+        if ml_prediction:
+            confidence_message += f" (ML: {ml_prediction['direction']} @ {ml_prediction['confidence']:.2f})"
         append_log_safe(confidence_message)
 
         if confidence < CONFIG['confidence_threshold']:
@@ -171,6 +226,32 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
         total_gain_usd = current_total_usd - initial_total_usd
         
         log_and_print_status({'usdt': balance_usdt, 'sol': balance_sol, 'sol_price': sol_current_price}, current_total_usd, total_gain_usd, trade_action, volume, sol_current_price)
+        
+        # Log trade with context for future learning
+        try:
+            import json
+            trade_log_entry = {
+                'timestamp': get_timestamp(),
+                'action': trade_action,
+                'volume': volume,
+                'price': sol_current_price,
+                'balance_usdt': balance_usdt,
+                'balance_sol': balance_sol,
+                'confidence': confidence,
+                'rsi_btc': btc_indicators.get('rsi'),
+                'rsi_sol': sol_indicators.get('rsi'),
+                'macd_btc': btc_indicators.get('macd', [0, 0])[0] if isinstance(btc_indicators.get('macd'), tuple) else 0,
+                'macd_sol': sol_indicators.get('macd', [0, 0])[0] if isinstance(sol_indicators.get('macd'), tuple) else 0,
+            }
+            if ml_prediction:
+                trade_log_entry['ml_direction'] = ml_prediction.get('direction')
+                trade_log_entry['ml_confidence'] = ml_prediction.get('confidence')
+            
+            with open('trade_log.json', 'a') as f:
+                json.dump(trade_log_entry, f)
+                f.write('\n')
+        except Exception as e:
+            logger.debug(f"Error logging trade for learning: {e}")
         
         last_trade_time = now
         return balance_usdt, balance_sol, last_trade_time

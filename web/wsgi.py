@@ -21,8 +21,10 @@ from utils.shared_state import set_socketio_instance
 set_socketio_instance(socketio)
 
 # WSGI application object for Gunicorn
-# For Flask-SocketIO with eventlet workers, socketio.WSGIApp wraps the Flask app
-application = socketio.WSGIApp(socketio, app)
+# For Flask-SocketIO with eventlet workers, use the Flask app directly.
+# The SocketIO instance wraps the Flask app and will handle WebSocket connections
+# automatically when using eventlet workers.
+application = app
 
 if __name__ == '__main__':
     # This should not be run directly - use gunicorn instead

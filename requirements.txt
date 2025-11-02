@@ -13,3 +13,7 @@ colorama
 pytest
 gunicorn
 eventlet
+# GPU acceleration (optional - install with install_gpu_dependencies.sh)
+# cupy-cuda11x or cupy-cuda12x  # Uncomment and choose based on CUDA version
+# torch  # Install from PyTorch website with CUDA support
+# scikit-learn

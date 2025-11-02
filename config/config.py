@@ -66,5 +66,11 @@ CONFIG = {
         'btc_momentum': 0.2,
         'adx': 0.1,
         'obv': 0.1
-    }
+    },
+    # Machine Learning settings
+    'ml_enabled': True,  # Enable ML predictions
+    'ml_model_path': 'models/price_predictor.pth',
+    'ml_confidence_weight': 0.3,  # How much ML confidence contributes to trade decision
+    'ml_min_confidence': 0.6,  # Minimum ML confidence to use prediction
+    'ml_use_gpu': True,  # Use GPU for ML inference
 }

@@ -12,7 +12,7 @@ import numpy as np
 import json
 
 # Import shared state
-from utils.shared_state import bot_state, update_bot_state_safe, get_bot_state_safe, set_socketio_instance
+from utils.shared_state import bot_state, update_bot_state_safe, get_bot_state_safe, set_socketio_instance, append_log_safe
 from utils.config_manager import load_profiles, save_profile, apply_profile, mask_value
 
 class NumpyEncoder(json.JSONEncoder):
@@ -37,6 +37,10 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # Set socketio instance in shared_state module for WebSocket emits
 set_socketio_instance(socketio)
 
+# Store thread references for proper management
+_simulation_thread = None
+_live_trading_thread = None
+
 # Route to serve dashboard HTML
 @app.route('/')
 @app.route('/dashboard')
@@ -47,12 +51,30 @@ def dashboard():
 
 @app.route('/start_simulation', methods=['POST'])
 def start_simulation():
+    global _simulation_thread
     state = get_bot_state_safe()
     if not state['running']:
         data = request.json
         initial_usdt = data.get('initial_usdt', 1000)
         initial_sol = data.get('initial_sol', 10)
-        threading.Thread(target=lambda: asyncio.run(simulate_main(initial_usdt, initial_sol))).start()
+        
+        def run_simulation():
+            try:
+                # Run the simulation - it will continue until explicitly stopped
+                asyncio.run(simulate_main(initial_usdt, initial_sol))
+            except Exception as e:
+                import traceback
+                error_msg = f"Simulation error: {str(e)}\n{traceback.format_exc()}"
+                print(error_msg)
+                update_bot_state_safe({'running': False, 'mode': None})
+                append_log_safe(error_msg)
+            finally:
+                # Ensure state is cleared when simulation ends
+                update_bot_state_safe({'running': False, 'mode': None})
+        
+        # Use non-daemon thread so it persists independently of the web server
+        _simulation_thread = threading.Thread(target=run_simulation, daemon=False, name="SolBot-Simulation")
+        _simulation_thread.start()
         update_bot_state_safe({'running': True, 'mode': 'simulation'})
         # Emit WebSocket update
         socketio.emit('status_update', get_bot_state_safe())
@@ -61,9 +83,24 @@ def start_simulation():
 
 @app.route('/start_live', methods=['POST'])
 def start_live():
+    global _live_trading_thread
     state = get_bot_state_safe()
     if not state['running']:
-        threading.Thread(target=lambda: asyncio.run(live_trade_main())).start()
+        def run_live_trading():
+            try:
+                asyncio.run(live_trade_main())
+            except Exception as e:
+                import traceback
+                error_msg = f"Live trading error: {str(e)}\n{traceback.format_exc()}"
+                print(error_msg)
+                update_bot_state_safe({'running': False, 'mode': None})
+                append_log_safe(error_msg)
+            finally:
+                update_bot_state_safe({'running': False, 'mode': None})
+        
+        # Use non-daemon thread so it persists independently of the web server
+        _live_trading_thread = threading.Thread(target=run_live_trading, daemon=False, name="SolBot-LiveTrading")
+        _live_trading_thread.start()
         update_bot_state_safe({'running': True, 'mode': 'live'})
         # Emit WebSocket update
         socketio.emit('status_update', get_bot_state_safe())

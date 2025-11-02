@@ -194,6 +194,91 @@ You can also run Gunicorn manually (for testing):
 gunicorn -c web/gunicorn.conf.py web.wsgi:application
 ```
 
+## Running Simulations with Laptop Lid Closed
+
+When you close your laptop lid, Linux typically suspends the system, which will pause any running simulations. To prevent this and allow simulations to continue running:
+
+### Option 1: Prevent System Suspend on Lid Close (Recommended)
+
+This prevents the system from suspending when the lid is closed, allowing all processes (including simulations) to continue running:
+
+```bash
+sudo ./scripts/configure_lid_close.sh
+```
+
+This script:
+- Configures systemd-logind to ignore lid close events
+- Creates a backup of your current logind configuration
+- Restarts the logind service to apply changes
+
+**To revert:** Restore from the backup file created by the script.
+
+### Option 2: Run Simulation as a Systemd User Service
+
+Run simulations as a persistent service that survives disconnections:
+
+1. **Create the service:**
+   ```bash
+   ./scripts/create_simulation_service.sh
+   ```
+
+2. **Start the simulation service:**
+   ```bash
+   systemctl --user start solbot-simulation
+   ```
+
+3. **Enable it to start on login (optional):**
+   ```bash
+   systemctl --user enable solbot-simulation
+   ```
+
+4. **Check status:**
+   ```bash
+   systemctl --user status solbot-simulation
+   ```
+
+5. **View logs:**
+   ```bash
+   journalctl --user -u solbot-simulation -f
+   ```
+
+6. **Stop the service:**
+   ```bash
+   systemctl --user stop solbot-simulation
+   ```
+
+**Customizing simulation parameters:** Edit the service file at `~/.config/systemd/user/solbot-simulation.service` and modify the `ExecStart` line, then run `systemctl --user daemon-reload`.
+
+### Option 3: Use Screen or Tmux (Quick Alternative)
+
+For a quick solution without modifying system settings:
+
+```bash
+# Using screen
+screen -S solbot-sim
+cd /home/cali/solbot
+source venv/bin/activate
+python simulate.py
+# Press Ctrl+A then D to detach
+
+# To reattach later
+screen -r solbot-sim
+```
+
+```bash
+# Using tmux
+tmux new -s solbot-sim
+cd /home/cali/solbot
+source venv/bin/activate
+python simulate.py
+# Press Ctrl+B then D to detach
+
+# To reattach later
+tmux attach -t solbot-sim
+```
+
+**Note:** Options 1 and 2 work best together - configure logind to prevent suspend AND run as a service for maximum reliability.
+
 ## Project Structure
 
 ```

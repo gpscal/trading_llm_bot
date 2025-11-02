@@ -42,7 +42,14 @@ async def run_trading_loop(
     
     logger.info(f"Starting trading loop with poll_interval={poll_interval}s, update_history={update_history}")
     
+    # Continue running until explicitly stopped
     while True:
+        # Check if we should stop (only stop if explicitly set to False)
+        state = get_bot_state_safe()
+        if not state.get('running', True):
+            logger.info("Running state set to False, stopping trading loop")
+            break
+        
         try:
             # Sleep first to avoid immediate execution
             await asyncio.sleep(poll_interval)
@@ -153,4 +160,9 @@ async def run_trading_loop(
             
         except Exception as e:
             logger.error(f"Error in trading loop cycle: {e}", exc_info=True)
+            # Check running state again after error
+            state = get_bot_state_safe()
+            if not state.get('running', True):
+                logger.info("Running state set to False after error, stopping trading loop")
+                break
             await asyncio.sleep(5)  # Brief pause before retry

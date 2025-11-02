@@ -25,11 +25,22 @@ def parse_args():
 
 async def main(initial_balance_usdt, initial_balance_sol):
     try:
+        # Fetch initial SOL price with retry logic
+        sol_price = await fetch_initial_sol_price()
+        if sol_price is None:
+            logger.error("Failed to fetch initial SOL price. Retrying...")
+            # Retry once
+            sol_price = await fetch_initial_sol_price()
+            if sol_price is None:
+                logger.error("Failed to fetch SOL price after retry. Simulation cannot continue.")
+                append_log_safe("Error: Failed to fetch initial SOL price. Please check your internet connection and Kraken API availability.")
+                return
+        
         # Use specified initial balance
         balance = {
             'usdt': initial_balance_usdt,
             'sol': initial_balance_sol,
-            'sol_price': await fetch_initial_sol_price(),
+            'sol_price': sol_price,
             'btc_price': 0.0,
             'btc_momentum': 0.0,
             'confidence': 0.0,
@@ -44,6 +55,9 @@ async def main(initial_balance_usdt, initial_balance_sol):
         balance['peak_total_usd'] = balance['initial_total_usd']
         balance['position_entry_price'] = None
         balance['trailing_high_price'] = None
+        
+        logger.info(f"Simulation starting with balance: USDT={balance['usdt']}, SOL={balance['sol']}, SOL Price={sol_price}, Total USD={balance['initial_total_usd']}")
+        append_log_safe(f"Simulation started: Initial balance USDT={balance['usdt']}, SOL={balance['sol']}, Total USD={balance['initial_total_usd']:.2f}")
         
         # Update shared state
         update_bot_state_safe({"balance": balance})
