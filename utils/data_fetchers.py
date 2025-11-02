@@ -40,6 +40,13 @@ async def fetch_and_analyze_historical_data(pairs, balance):
             # Persist indicators on the shared balance state for downstream consumers
             balance['btc_indicators'] = btc_indicators
             balance['sol_indicators'] = sol_indicators
+            
+            # Store historical data for ML and profitability predictions
+            # Keep only recent data (at least 60 candles for feature extraction)
+            if len(sol_historical) >= 60:
+                balance['sol_historical'] = sol_historical[:100]  # Keep last 100 candles
+            if len(btc_historical) >= 60:
+                balance['btc_historical'] = btc_historical[:100]  # Keep last 100 candles
 
         # print("Historical data analyzed and indicators set")  
     except Exception as e:

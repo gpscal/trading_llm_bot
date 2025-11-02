@@ -73,4 +73,11 @@ CONFIG = {
     'ml_confidence_weight': 0.3,  # How much ML confidence contributes to trade decision
     'ml_min_confidence': 0.6,  # Minimum ML confidence to use prediction
     'ml_use_gpu': True,  # Use GPU for ML inference
+    
+    # Profitability Prediction settings (learned from trade outcomes)
+    'profitability_prediction_enabled': True,  # Enable profitability predictions
+    'profitability_model_path': 'models/profitability_predictor.pth',
+    'profitability_norm_path': 'models/profitability_predictor_norm.json',
+    'profitability_boost_weight': 0.4,  # How much profitability prediction contributes to confidence
+    'min_profitability_threshold': 0.3,  # Minimum profitability probability to execute trade (0-1)
 }

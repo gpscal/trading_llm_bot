@@ -88,9 +88,17 @@ class TradeHistoryAnalyzer:
             is_profitable = profit_pct > 0.5  # More than 0.5% profit (accounting for fees)
             
             # Extract conditions from buy trade
+            # Use actual RSI/MACD values from trade log (rsi_btc, rsi_sol, etc.)
+            rsi_sol = buy_trade.get('rsi_sol')
+            rsi_btc = buy_trade.get('rsi_btc')
+            macd_sol = buy_trade.get('macd_sol')
+            macd_btc = buy_trade.get('macd_btc')
+            
             conditions = {
-                'rsi': buy_trade.get('rsi', 'unknown'),
-                'macd': buy_trade.get('macd', 'unknown'),
+                'rsi_sol': round(rsi_sol, 1) if rsi_sol is not None else 'unknown',
+                'rsi_btc': round(rsi_btc, 1) if rsi_btc is not None else 'unknown',
+                'macd_sol': round(macd_sol, 3) if macd_sol is not None else 'unknown',
+                'macd_btc': round(macd_btc, 3) if macd_btc is not None else 'unknown',
                 'confidence': buy_trade.get('confidence', 'unknown'),
                 'time_of_day': self._get_time_of_day(buy_trade.get('timestamp', '')),
             }

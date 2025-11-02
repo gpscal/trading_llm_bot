@@ -136,20 +136,78 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
             except Exception as e:
                 logger.error(f"ML prediction error: {e}")
         
+        # Add profitability prediction if enabled
+        profitability_prediction = None
+        profitability_boost = 0.0
+        if CONFIG.get('profitability_prediction_enabled', False):
+            try:
+                # Lazy import to avoid circular dependencies
+                from ml.profitability_predictor_manager import get_profitability_predictor_manager
+                profitability_manager = get_profitability_predictor_manager(
+                    CONFIG.get('profitability_model_path', 'models/profitability_predictor.pth'),
+                    CONFIG.get('profitability_norm_path', 'models/profitability_predictor_norm.json'),
+                    CONFIG.get('ml_use_gpu', True)
+                )
+                
+                # Get historical data for profitability prediction
+                # In production, this should be cached
+                try:
+                    # Try to get historical data from balance if available
+                    sol_historical = balance.get('sol_historical') if balance else None
+                    btc_historical = balance.get('btc_historical') if balance else None
+                    
+                    # If not available in balance, we'll skip profitability prediction for now
+                    # (In production, maintain a historical data cache)
+                    if sol_historical and len(sol_historical) >= 60:
+                        profitability_prediction = profitability_manager.predict_profitability(
+                            sol_historical, btc_historical
+                        )
+                        
+                        if profitability_prediction:
+                            profitability_prob = profitability_prediction['probability']
+                            is_profitable = profitability_prediction['profitable']
+                            
+                            # Boost confidence if model predicts profitable trade
+                            if is_profitable:
+                                # Higher probability = higher boost
+                                profitability_boost = (profitability_prob - 0.5) * CONFIG.get('profitability_boost_weight', 0.4)
+                            else:
+                                # Penalize if model predicts unprofitable
+                                profitability_boost = (profitability_prob - 0.5) * CONFIG.get('profitability_boost_weight', 0.4)
+                            
+                            logger.info(f"Profitability Prediction - Prob: {profitability_prob:.3f}, "
+                                       f"Profitable: {is_profitable}, Boost: {profitability_boost:.3f}")
+                            append_log_safe(f"Profitability: {profitability_prob:.1%} (boost: {profitability_boost:+.2f})")
+                except Exception as e:
+                    logger.debug(f"Profitability prediction skipped: {e}")
+            except Exception as e:
+                logger.error(f"Profitability prediction error: {e}")
+        
         # Add ML confidence boost
         confidence += ml_confidence_boost
+        # Add profitability boost
+        confidence += profitability_boost
         
-        logger.info(f"Indicators - MACD: {btc_indicators['macd']}, {sol_indicators['macd']} | RSI: {btc_indicators['rsi']}, {sol_indicators['rsi']} | ADX: {btc_indicators.get('adx', 'N/A')}, {sol_indicators.get('adx', 'N/A')} | OBV: {btc_indicators['obv']}, {sol_indicators['obv']} | ML Boost: {ml_confidence_boost:.2f} | Total Confidence: {confidence:.2f}")
+        logger.info(f"Indicators - MACD: {btc_indicators['macd']}, {sol_indicators['macd']} | RSI: {btc_indicators['rsi']}, {sol_indicators['rsi']} | ADX: {btc_indicators.get('adx', 'N/A')}, {sol_indicators.get('adx', 'N/A')} | OBV: {btc_indicators['obv']}, {sol_indicators['obv']} | ML Boost: {ml_confidence_boost:.2f} | Profitability Boost: {profitability_boost:.2f} | Total Confidence: {confidence:.2f}")
         
         # Append to shared logs
         confidence_message = f"[{get_timestamp()}] Confidence: {confidence:.2f}"
         if ml_prediction:
             confidence_message += f" (ML: {ml_prediction['direction']} @ {ml_prediction['confidence']:.2f})"
+        if profitability_prediction:
+            confidence_message += f" (Profit: {profitability_prediction['probability']:.1%})"
         append_log_safe(confidence_message)
 
         if confidence < CONFIG['confidence_threshold']:
             logger.info(f"{get_timestamp()} Confidence too low. Skipping trade.")
             return balance_usdt, balance_sol, last_trade_time
+        
+        # Additional filter: if profitability model strongly predicts unprofitable, skip trade
+        if CONFIG.get('profitability_prediction_enabled', False) and profitability_prediction:
+            min_profitability_threshold = CONFIG.get('min_profitability_threshold', 0.3)
+            if profitability_prediction['probability'] < min_profitability_threshold:
+                logger.info(f"{get_timestamp()} Profitability prediction too low ({profitability_prediction['probability']:.1%}). Skipping trade.")
+                return balance_usdt, balance_sol, last_trade_time
 
         volume = calculate_volume(sol_current_price, balance_usdt, CONFIG)
         trade_action = 'buy' if btc_indicators['momentum'] > 0 else 'sell'
