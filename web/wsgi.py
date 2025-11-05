@@ -5,6 +5,12 @@ This module provides the WSGI application object for running Flask-SocketIO
 with Gunicorn using eventlet workers.
 """
 
+# CRITICAL: Monkey-patch eventlet BEFORE any other imports
+# This must be the very first import to ensure all subsequent imports
+# use eventlet's green-threaded versions of threading, socket, etc.
+import eventlet
+eventlet.monkey_patch()
+
 import sys
 import os
 
@@ -14,11 +20,11 @@ sys.path.insert(0, project_root)
 
 # Import Flask app and SocketIO instance
 from web.app import app, socketio
-from utils.shared_state import set_socketio_instance
+from utils.shared_state import set_socketio_and_app
 
-# Ensure socketio instance is set in shared_state (for WebSocket emits)
-# This is already done in app.py, but we ensure it here as well
-set_socketio_instance(socketio)
+# Ensure socketio and app instances are set in shared_state (for WebSocket emits)
+# This is already done in app.py, but we ensure it here as well for Gunicorn workers
+set_socketio_and_app(socketio, app)
 
 # WSGI application object for Gunicorn
 # For Flask-SocketIO with eventlet workers, use the Flask app directly.

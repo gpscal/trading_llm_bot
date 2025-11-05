@@ -1,0 +1,35 @@
+[Unit]
+Description=Trading LLM Bot Simulation Service
+After=network.target
+
+[Service]
+Type=simple
+User=%USER%
+Group=%GROUP%
+WorkingDirectory=%PROJECT_ROOT%
+Environment="PATH=%VENV_BIN%:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONPATH=%PROJECT_ROOT%"
+# Load environment variables from .env file if it exists
+EnvironmentFile=-%PROJECT_ROOT%/.env
+
+# Gunicorn command for simulation service
+ExecStart=%VENV_BIN%/gunicorn -c simulate_gunicorn.conf.py simulate_wsgi:application
+
+# Graceful reload
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy - restart on failure to ensure simulation keeps running
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trading-llm-bot
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

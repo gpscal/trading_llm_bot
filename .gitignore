@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # Environments
 .env
@@ -12,6 +13,7 @@ ENV/
 
 # Logs
 *.log
+logs/*.pid
 
 # Byte-compiled / optimized / DLL files
 *.pyd
@@ -58,3 +60,6 @@ Thumbs.db
 
 # Web
 *.map
+
+# Trade logs
+trade_log.json

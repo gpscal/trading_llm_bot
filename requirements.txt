@@ -17,3 +17,11 @@ eventlet
 # cupy-cuda11x or cupy-cuda12x  # Uncomment and choose based on CUDA version
 # torch  # Install from PyTorch website with CUDA support
 # scikit-learn
+
+# LLM Trading Advisor dependencies (for LLM_trader integration)
+ccxt>=4.4.52
+tiktoken>=0.8.0
+rich>=13.9.4
+numba>=0.61.0
+scipy>=1.15.1
+openai>=1.61.0

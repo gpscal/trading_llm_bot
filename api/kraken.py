@@ -51,25 +51,68 @@ async def get_balance():
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def get_historical_data(pair, interval):
+    """
+    Fetch historical OHLCV data from Kraken API with rate limit handling.
+    
+    Implements exponential backoff for rate limit errors.
+    """
+    import asyncio
+    
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            try:
-                data = await response.json()
-                response.raise_for_status()
-                if 'error' in data and data['error']:
-                    logger.error(f"Error fetching historical data: {data['error']}")
-                    return None
-                return data['result'].get(pair)
-            except aiohttp.ClientError as e:
-                logger.error(f"Client error: {str(e)}")
+    
+    max_retries = 3
+    base_delay = 5  # Start with 5 seconds
+    
+    for attempt in range(max_retries):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    data = await response.json()
+                    
+                    # Check for rate limiting error
+                    if 'error' in data and data['error']:
+                        error_msg = data['error']
+                        if any('Too many requests' in str(err) or 'rate limit' in str(err).lower() for err in error_msg):
+                            if attempt < max_retries - 1:
+                                delay = base_delay * (2 ** attempt)  # Exponential backoff: 5s, 10s, 20s
+                                logger.warning(f"Rate limited. Waiting {delay}s before retry {attempt + 1}/{max_retries}")
+                                await asyncio.sleep(delay)
+                                continue
+                            else:
+                                logger.error(f"Rate limited after {max_retries} attempts: {error_msg}")
+                                return None
+                        else:
+                            logger.error(f"Error fetching historical data: {error_msg}")
+                            return None
+                    
+                    response.raise_for_status()
+                    
+                    # Success
+                    result = data['result'].get(pair)
+                    if result:
+                        logger.debug(f"Successfully fetched {len(result)} candles for {pair}")
+                    return result
+                    
+        except aiohttp.ClientError as e:
+            logger.error(f"Client error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+            else:
                 return None
-            except aiohttp.ServerError as e:
-                logger.error(f"Server error: {str(e)}")
+        except aiohttp.ServerError as e:
+            logger.error(f"Server error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+            else:
                 return None
-            except Exception as e:
-                logger.error(f"Unexpected error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(base_delay * (2 ** attempt))
+            else:
                 return None
+    
+    return None
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def get_ticker(pair):

@@ -9,13 +9,25 @@ logger = setup_logger('periodic_tasks', 'periodic_tasks.log')
 async def print_status_periodically(balance):
     while True:
         current_total_usd = calculate_total_usd(balance)
-        total_gain_usd = calculate_total_gain_usd(current_total_usd, balance['initial_total_usd'])
+        total_gain_usd = calculate_total_gain_usd(current_total_usd, balance.get('initial_total_usd', 0))
+        
+        selected_coin = balance.get('selected_coin', 'SOL')
+        coins = balance.get('coins', {})
+        
+        # Build coin balances summary
+        coin_summaries = []
+        for coin, data in coins.items():
+            amount = data.get('amount', 0.0)
+            price = data.get('price', 0.0)
+            value = amount * price
+            coin_summaries.append(f"{coin}: {amount:.6f} @ ${price:.2f} = ${value:.2f}")
         
         status_message = (
-            f"Current Balances: USDT: {balance['usdt']:.2f}, SOL: {balance['sol']:.2f}\n"
-            f"Current SOL Price: {balance['sol_price']:.2f}\n"
-            f"Current Total USD: {current_total_usd:.2f}\n"
-            f"Total Gain USD: {total_gain_usd:.2f}"
+            f"Trading: {selected_coin}\n"
+            f"USDT Balance: ${balance.get('usdt', 0.0):.2f}\n"
+            f"{chr(10).join(coin_summaries)}\n"
+            f"Total Portfolio Value: ${current_total_usd:.2f}\n"
+            f"Total Gain: ${total_gain_usd:.2f} ({(total_gain_usd / balance.get('initial_total_usd', 1) * 100):.2f}%)"
         )
         
         print(status_message)

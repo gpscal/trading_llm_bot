@@ -1,0 +1,178 @@
+## Detailed Integration Plan for Multi-Coin Trading
+
+### Phase 1: Core Architecture Refactoring
+
+1.1 Configuration Layer
+
+• Add  tradable_coins  list to config.py to support multiple coins
+• Add  default_coin  setting
+• Create coin-specific balance tracking structure
+• Maintain backward compatibility with existing SOL-only setup
+
+1.2 Balance Structure Update
+
+• Refactor balance dictionary to support multiple coin balances
+• Change from  balance['sol']  to  balance['coins']['SOL']  and  balance['coins']['BTC']
+• Keep USDT as the base currency
+• Add per-coin position tracking (entry price, trailing stops)
+
+1.3 Trading Pairs Management
+
+• Create a  CoinPairManager  utility class to handle:
+  • Kraken pair name mapping (e.g., 'BTC' → 'XXBTZUSD', 'SOL' → 'SOLUSDT')
+  • Price fetching for multiple coins
+  • Historical data retrieval per coin
+
+
+### Phase 2: Trading Logic Enhancement
+
+2.1 Multi-Coin Trade Logic
+
+• Modify  trade_logic.py  to accept a  selected_coin  parameter
+• Update  execute_trade()  to handle any coin (not just SOL)
+• Implement coin-specific volume calculations
+• Keep the dual-indicator approach (use both BTC and SOL indicators regardless of which coin is being traded)
+
+2.2 Indicator Calculation
+
+• Already supports both BTC and SOL indicators ✓
+• No changes needed here - this is working well
+
+2.3 LLM Advisor Integration
+
+• Update LLM advisor calls to specify which coin is being traded
+• Pass the selected coin context to the LLM
+• LLM should analyze market conditions for the specific coin being traded
+
+### Phase 3: API Layer Updates
+
+3.1 Kraken API Enhancements
+
+• Update  get_ticker()  to handle BTC/USD pair
+• Update  get_historical_data()  to support both coins
+• Add coin-specific balance retrieval
+• Ensure proper pair name formatting for each coin
+
+3.2 WebSocket Updates
+
+• Modify websocket subscriptions to include BTC/USD (currently has XBT/USD and SOL/USD)
+• Update  handle_websocket_data()  to route data to the correct coin's price tracker
+
+### Phase 4: Simulation & Live Trading Updates
+
+4.1 Simulation Script (simulate.py)
+
+• Add  --coin  argument to select which coin to trade (default: SOL)
+• Update balance initialization for selected coin
+• Fetch correct initial prices based on coin selection
+• Support  --initial_balance_btc  argument
+
+4.2 Live Trading Script (live_trade.py)
+
+• Add coin selection parameter
+• Update Kraken balance fetching to get the correct coin balance
+• Ensure proper pair usage for live orders
+
+### Phase 5: Dashboard Integration
+
+5.1 Frontend Updates (dashboard.html)
+
+• Add coin selector dropdown in Control Panel:
+<select id="coin-select">
+  <option value="SOL">Solana (SOL)</option>
+  <option value="BTC">Bitcoin (BTC)</option>
+</select>
+
+• Update initial balance inputs to be dynamic based on selected coin
+• Add BTC balance display section
+
+5.2 Backend API Updates (web/app.py)
+
+• Add  /start_simulation  endpoint parameter for coin selection
+• Add  /start_live  endpoint parameter for coin selection
+• Update status endpoints to show active coin and balances for all tracked coins
+• Add  /api/select_coin  endpoint for runtime coin switching (simulation only)
+
+5.3 JavaScript Updates (dashboard.js)
+
+• Capture coin selection on start
+• Update UI labels dynamically based on selected coin
+• Show balance for the selected trading coin
+• Display indicators for both coins (as both are used for decision-making)
+
+### Phase 6: Utility Updates
+
+6.1 Shared State Management
+
+• Update  shared_state.py  to track:
+  • Currently selected trading coin
+  • Balances for all coins
+  • Per-coin trade history
+
+
+6.2 Volume Calculator
+
+• Make  calculate_volume()  coin-agnostic
+• Add coin-specific min/max volume constraints
+
+6.3 Logging & Alerts
+
+• Update log messages to include coin name
+• Modify trade log entries to specify which coin was traded
+
+### Phase 7: Testing & Validation
+
+7.1 Unit Tests
+
+• Test multi-coin balance calculations
+• Test coin switching
+• Test trade execution for both BTC and SOL
+
+7.2 Integration Tests
+
+• Test simulation mode with BTC
+• Test simulation mode with SOL
+• Test coin switching during simulation (if supported)
+• Test live trading preparation (without actual trades)
+
+### Phase 8: Documentation
+
+8.1 Update README.md
+
+• Add multi-coin trading section
+• Document new CLI arguments
+• Update architecture diagram
+
+8.2 Add Migration Guide
+
+• Document changes from SOL-only to multi-coin
+• Provide examples of coin selection usage
+
+## Implementation Priority
+
+High Priority (MVP for BTC trading):
+
+1. Config updates for coin selection
+2. Balance structure refactoring
+3. Trade logic updates for selected coin
+4. Dashboard coin selector UI
+5. Simulation script coin parameter
+
+Medium Priority (Enhanced features):
+6. Live trading coin selection
+7. WebSocket multi-coin support
+8. Historical data per coin
+9. LLM advisor coin-specific context
+
+Low Priority (Nice-to-have):
+10. Runtime coin switching
+11. Multi-coin concurrent trading (trading both simultaneously)
+12. Advanced coin-specific strategies
+
+## Key Design Decisions
+
+1. Single Active Coin: Trade only one coin at a time to keep logic simple initially
+2. Dual Indicators: Continue using both BTC and SOL indicators for any coin traded
+3. USDT Base: Keep USDT as the base currency for all trades
+4. Backward Compatible: Ensure existing SOL-only setups continue working
+5. LLM Integration: LLM advisor remains active and receives coin-specific context

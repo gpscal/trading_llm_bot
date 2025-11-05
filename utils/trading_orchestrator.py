@@ -25,20 +25,25 @@ async def run_trading_loop(
     pairs: Dict[str, str],
     ticker_fetcher: Optional[Callable] = None,
     poll_interval: Optional[float] = None,
-    update_history: bool = False
+    update_history: bool = False,
+    selected_coin: Optional[str] = None
 ) -> None:
     """Unified trading loop for both live and simulation modes.
     
     Args:
-        balance: Balance dict with usdt, sol, prices, indicators, etc.
-        pairs: Dict mapping 'btc' and 'sol' to Kraken pair symbols
+        balance: Balance dict with usdt, coins, prices, indicators, etc.
+        pairs: Dict mapping coin symbols to Kraken pair symbols (e.g., {'BTC': 'XXBTZUSD', 'SOL': 'SOLUSDT'})
         ticker_fetcher: Optional async function to fetch current tickers (for live mode)
         poll_interval: Seconds between poll cycles (defaults to CONFIG['poll_interval'])
         update_history: If True, append to price/equity/drawdown history (for simulation dashboard)
+        selected_coin: The coin to trade (defaults to CONFIG default_coin)
     """
     poll_interval = poll_interval or CONFIG['poll_interval']
-    initial_sol_price = balance.get('sol_price', 0.0)
+    trade_coin = (selected_coin or balance.get('selected_coin') or CONFIG.get('default_coin', 'SOL')).upper()
+    balance['selected_coin'] = trade_coin
+    
     initial_total_usd = balance.get('initial_total_usd', 0.0)
+    initial_coin_price = balance.get('coins', {}).get(trade_coin, {}).get('price', 0.0)
     
     logger.info(f"Starting trading loop with poll_interval={poll_interval}s, update_history={update_history}")
     
@@ -59,24 +64,32 @@ async def run_trading_loop(
             
             # Get current prices (from ticker API for live, from balance for sim)
             if ticker_fetcher:
-                # Live mode: fetch fresh ticker data
-                btc_ticker = await ticker_fetcher(pairs['btc'])
-                sol_ticker = await ticker_fetcher(pairs['sol'])
-                if not btc_ticker or not sol_ticker:
-                    logger.error("Failed to fetch ticker data, skipping cycle")
-                    continue
-                btc_price = float(btc_ticker['c'][0])
-                sol_price = float(sol_ticker['c'][0])
-                balance['btc_price'] = btc_price
-                balance['sol_price'] = sol_price
+                # Live mode: fetch fresh ticker data for all pairs
+                prices = {}
+                for coin, pair in pairs.items():
+                    ticker = await ticker_fetcher(pair)
+                    if not ticker:
+                        logger.error(f"Failed to fetch ticker data for {coin}, skipping cycle")
+                        continue
+                    prices[coin] = float(ticker['c'][0])
+                    if coin in balance.get('coins', {}):
+                        balance['coins'][coin]['price'] = prices[coin]
+                
+                # Backward compatibility
+                balance['btc_price'] = prices.get('BTC', 0.0)
+                balance['sol_price'] = prices.get('SOL', 0.0)
             else:
                 # Simulation mode: use prices from balance (updated by websocket)
-                btc_price = balance.get('btc_price', 0.0)
-                sol_price = balance.get('sol_price', 0.0)
+                prices = {coin: data.get('price', 0.0) for coin, data in balance.get('coins', {}).items()}
+                balance['btc_price'] = prices.get('BTC', 0.0)
+                balance['sol_price'] = prices.get('SOL', 0.0)
+            
+            btc_price = prices.get('BTC', balance.get('btc_price', 0.0))
+            sol_price = prices.get('SOL', balance.get('sol_price', 0.0))
             
             # Get indicators from balance (populated by fetch_and_analyze_historical_data)
-            btc_indicators = balance.get('btc_indicators', {})
-            sol_indicators = balance.get('sol_indicators', {})
+            btc_indicators = balance.get('coins', {}).get('BTC', {}).get('indicators') or balance.get('btc_indicators', {})
+            sol_indicators = balance.get('coins', {}).get('SOL', {}).get('indicators') or balance.get('sol_indicators', {})
             
             if not btc_price or not sol_price:
                 logger.warning(f"Missing prices: BTC={btc_price}, SOL={sol_price}, skipping trade")
@@ -87,16 +100,27 @@ async def run_trading_loop(
                 continue
             
             # Execute trade logic
-            balance['usdt'], balance['sol'], balance['last_trade_time'] = handle_trade_with_fees(
+            coin_balance = balance.get('coins', {}).get(trade_coin, {}).get('amount', 0.0)
+            balance['usdt'], new_coin_balance, balance['last_trade_time'] = await handle_trade_with_fees(
                 btc_price, sol_price,
-                balance['usdt'], balance['sol'], balance.get('last_trade_time', 0),
+                balance['usdt'], coin_balance, balance.get('last_trade_time', 0),
                 btc_indicators, sol_indicators,
-                initial_sol_price, initial_total_usd,
-                balance
+                initial_coin_price, initial_total_usd,
+                balance,
+                selected_coin=trade_coin
             )
             
+            # Update coin balance in structure
+            if trade_coin in balance.get('coins', {}):
+                balance['coins'][trade_coin]['amount'] = new_coin_balance
+            
+            # Backward compatibility
+            balance['sol'] = balance.get('coins', {}).get('SOL', {}).get('amount', 0.0)
+            balance['btc'] = balance.get('coins', {}).get('BTC', {}).get('amount', 0.0)
+            
             # Calculate metrics
-            current_total_usd = balance['usdt'] + balance['sol'] * sol_price
+            from utils.utils import calculate_total_usd
+            current_total_usd = calculate_total_usd(balance)
             total_gain_usd = current_total_usd - initial_total_usd
             
             # Update peak equity for drawdown calculation
@@ -108,10 +132,12 @@ async def run_trading_loop(
             drawdown_pct = 0.0 if peak == 0 else max(0.0, (peak - current_total_usd) / peak * 100.0)
             
             # Log status
-            log_and_print_status(balance, current_total_usd, total_gain_usd)
+            log_and_print_status(balance, current_total_usd, total_gain_usd, coin=trade_coin)
             
-            # Update shared state
+            # Update shared state - ensure running flag is set
             update_data = {
+                "running": True,  # Ensure this stays True during trading
+                "selected_coin": trade_coin,
                 "balance": balance.copy(),
                 "indicators": {
                     "btc": btc_indicators.copy(),
@@ -123,8 +149,9 @@ async def run_trading_loop(
             if update_history:
                 now_ts = time.time()
                 bot_state = get_bot_state_safe()
+                primary_price = prices.get(trade_coin, 0.0)
                 update_data.update({
-                    "price_history": bot_state.get("price_history", []) + [{"time": now_ts, "price": sol_price}],
+                    "price_history": bot_state.get("price_history", []) + [{"time": now_ts, "price": primary_price}],
                     "btc_price_history": bot_state.get("btc_price_history", []) + [{"time": now_ts, "price": btc_price}],
                     "equity_history": bot_state.get("equity_history", []) + [{"time": now_ts, "equity": current_total_usd}],
                     "drawdown_history": bot_state.get("drawdown_history", []) + [{"time": now_ts, "drawdown_pct": drawdown_pct}],

@@ -13,9 +13,12 @@ bind = os.getenv('BIND', '0.0.0.0:5000')
 backlog = 2048
 
 # Worker processes
-workers = int(os.getenv('WORKERS', multiprocessing.cpu_count() * 2 + 1))
+# With eventlet workers, a single worker can handle many concurrent connections
+# due to green threading. Set to 1 worker for simpler deployment.
+# You can override this with WORKERS environment variable if needed.
+workers = int(os.getenv('WORKERS', 1))
 worker_class = 'eventlet'  # Required for Flask-SocketIO
-worker_connections = 1000
+worker_connections = 1000  # Number of concurrent connections per worker
 timeout = 120  # Seconds for worker timeout (longer for WebSocket connections)
 keepalive = 5  # Seconds to wait for requests on Keep-Alive connection
 graceful_timeout = 30  # Seconds to wait for graceful worker restart
@@ -46,7 +49,9 @@ tmp_upload_dir = None
 # certfile = '/path/to/certfile'
 
 # Preload application for better performance
-preload_app = True
+# Disabled to fix eventlet RLock greening issues
+# With preload_app=True, locks are created before eventlet monkey-patches threading
+preload_app = False
 
 # Worker initialization
 def on_starting(server):
@@ -73,8 +78,19 @@ def post_fork(server, worker):
     server.log.info("Worker spawned (pid: %s)", worker.pid)
 
 def post_worker_init(worker):
-    """Called just after a worker has initialized the application."""
-    pass
+    """Called just after a worker has initialized the application.
+    
+    This is called after eventlet has monkey-patched threading,
+    so we can safely reinitialize locks here.
+    """
+    # Reset locks in shared_state after eventlet monkey-patching
+    # This ensures locks are properly "greened" for eventlet
+    try:
+        from utils.shared_state import reset_lock
+        reset_lock()
+        worker.log.info("Reset locks after eventlet monkey-patching")
+    except Exception as e:
+        worker.log.warning(f"Failed to reset locks: {e}")
 
 def worker_abort(worker):
     """Called when a worker times out."""

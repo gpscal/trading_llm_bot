@@ -1,80 +1,147 @@
 import time
-import numpy as np
 from config.config import CONFIG
-from utils.utils import get_timestamp, log_trade, log_and_print_status
+from utils.utils import get_timestamp, log_and_print_status
 from trade.volume_calculator import calculate_volume
 from utils.logger import setup_logger
 from utils.alerts import notify
-
-# Add imports
 from utils.shared_state import append_log_safe
 # ML import is lazy-loaded to avoid circular dependencies
 
 logger = setup_logger('trade_logic_logger', 'trade_logic.log')
 
-def execute_trade(action, volume, price, balance_usdt, balance_sol, trade_fee):
+def execute_trade(action, volume, price, balance_usdt, balance_coin, trade_fee):
     if action == 'buy':
         total_cost = volume * price * (1 + trade_fee)
         if balance_usdt < total_cost:
             volume = balance_usdt / (price * (1 + trade_fee))
             total_cost = volume * price * (1 + trade_fee)
         balance_usdt -= total_cost
-        balance_sol += volume
+        balance_coin += volume
     elif action == 'sell':
-        if balance_sol < volume:
-            volume = balance_sol
+        if balance_coin < volume:
+            volume = balance_coin
         total_revenue = volume * price * (1 - trade_fee)
         balance_usdt += total_revenue
-        balance_sol -= volume
-    return balance_usdt, balance_sol
+        balance_coin -= volume
+    return balance_usdt, balance_coin
 
-def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, balance_sol, last_trade_time, btc_indicators, sol_indicators, initial_sol_price, initial_total_usd, balance=None):
+async def handle_trade_with_fees(
+    btc_current_price,
+    sol_current_price,
+    balance_usdt,
+    balance_sol,
+    last_trade_time,
+    btc_indicators,
+    sol_indicators,
+    initial_sol_price,
+    initial_total_usd,
+    balance=None,
+    selected_coin=None
+):
+    balance_coin_amount = balance_sol
     try:
         now = time.time()
 
+        trade_coin = (selected_coin or (balance or {}).get('selected_coin') or CONFIG.get('default_coin', 'SOL')).upper()
+        if trade_coin not in ('SOL', 'BTC'):
+            logger.warning(f"{get_timestamp()} Unsupported trade coin {trade_coin}. Defaulting to SOL.")
+            trade_coin = 'SOL'
+        counter_coin = 'BTC' if trade_coin == 'SOL' else 'SOL'
+
+        # Initialize balance structure if needed
+        if balance is None:
+            balance = {}
+        balance.setdefault('coins', {})
+        for coin in ('SOL', 'BTC'):
+            balance['coins'].setdefault(coin, {
+                'amount': 0.0,
+                'price': 0.0,
+                'indicators': {},
+                'historical': [],
+                'position_entry_price': None,
+                'trailing_high_price': None,
+            })
+        balance['selected_coin'] = trade_coin
+
+        primary_state = balance['coins'][trade_coin]
+        secondary_state = balance['coins'][counter_coin]
+
+        primary_price = sol_current_price if trade_coin == 'SOL' else btc_current_price
+        secondary_price = btc_current_price if trade_coin == 'SOL' else sol_current_price
+
+        primary_indicators = sol_indicators if trade_coin == 'SOL' else btc_indicators
+        secondary_indicators = btc_indicators if trade_coin == 'SOL' else sol_indicators
+
+        primary_momentum = (primary_indicators or {}).get('momentum', 0) or 0
+
+        if btc_current_price is None or sol_current_price is None:
+            logger.warning(f"{get_timestamp()} Missing price data (BTC={btc_current_price}, SOL={sol_current_price}). Skipping trade.")
+            return balance_usdt, balance_coin_amount, last_trade_time
+
+        if btc_current_price <= 0 or sol_current_price <= 0:
+            logger.warning(f"{get_timestamp()} Invalid price data (BTC={btc_current_price}, SOL={sol_current_price}). Skipping trade.")
+            return balance_usdt, balance_coin_amount, last_trade_time
+
         if now - last_trade_time < CONFIG['cooldown_period']:
             logger.info(f"{get_timestamp()} Cooldown period active. Skipping trade.")
-            return balance_usdt, balance_sol, last_trade_time
+            return balance_usdt, balance_coin_amount, last_trade_time
 
         # --- Portfolio-level risk: max drawdown ---
         if balance is not None:
-            current_total_usd = balance_usdt + balance_sol * sol_current_price
+            # Update stored prices before risk calculations
+            primary_state['price'] = primary_price
+            secondary_state['price'] = secondary_price
+
+            # Calculate total portfolio value across coins
+            current_total_usd = balance_usdt
+            for coin, state in balance['coins'].items():
+                current_total_usd += state.get('amount', 0.0) * state.get('price', 0.0)
             # Initialize peak if missing
             peak_total_usd = balance.get('peak_total_usd', current_total_usd)
             if current_total_usd > peak_total_usd:
                 peak_total_usd = current_total_usd
                 balance['peak_total_usd'] = peak_total_usd
             max_drawdown_pct = CONFIG.get('max_drawdown_pct', 0) / 100.0
-            if max_drawdown_pct > 0 and current_total_usd <= peak_total_usd * (1 - max_drawdown_pct) and balance_sol > 0:
-                # De-risk: liquidate SOL position
+            if max_drawdown_pct > 0 and current_total_usd <= peak_total_usd * (1 - max_drawdown_pct) and balance_coin_amount > 0:
+                # De-risk: liquidate current position
                 trade_fee = CONFIG['trade_fee']
-                volume_to_sell = balance_sol
-                pre_usdt, pre_sol = balance_usdt, balance_sol
-                balance_usdt, balance_sol = execute_trade('sell', volume_to_sell, sol_current_price, balance_usdt, balance_sol, trade_fee)
-                msg = f"[{get_timestamp()}] Max drawdown hit. Liquidated {pre_sol:.6f} SOL at {sol_current_price:.2f}. USDT {pre_usdt:.2f} -> {balance_usdt:.2f}"
+                volume_to_sell = balance_coin_amount
+                pre_usdt, pre_coin = balance_usdt, balance_coin_amount
+                balance_usdt, balance_coin_amount = execute_trade('sell', volume_to_sell, primary_price, balance_usdt, balance_coin_amount, trade_fee)
+                primary_state['amount'] = balance_coin_amount
+                msg = f"[{get_timestamp()}] Max drawdown hit. Liquidated {pre_coin:.6f} {trade_coin} at {primary_price:.2f}. USDT {pre_usdt:.2f} -> {balance_usdt:.2f}"
                 logger.info(msg)
                 append_log_safe(msg)
                 notify(msg)
                 if balance is not None:
-                    balance['position_entry_price'] = None
-                    balance['trailing_high_price'] = None
-                return balance_usdt, balance_sol, now
+                    primary_state['position_entry_price'] = None
+                    primary_state['trailing_high_price'] = None
+                return balance_usdt, balance_coin_amount, now
+
+        btc_macd = btc_indicators.get('macd', (0, 0))
+        sol_macd = sol_indicators.get('macd', (0, 0))
+        btc_rsi = btc_indicators.get('rsi', 50)
+        sol_rsi = sol_indicators.get('rsi', 50)
+        btc_adx = btc_indicators.get('adx', 0)
+        sol_adx = sol_indicators.get('adx', 0)
+        btc_obv = btc_indicators.get('obv', 0)
+        sol_obv = sol_indicators.get('obv', 0)
 
         macd_condition = (
-            btc_indicators['macd'][0] < CONFIG['macd_threshold']['btc'] and 
-            sol_indicators['macd'][0] < CONFIG['macd_threshold']['sol']
+            btc_macd[0] < CONFIG['macd_threshold']['btc'] and 
+            sol_macd[0] < CONFIG['macd_threshold']['sol']
         )
         rsi_condition = (
-            btc_indicators['rsi'] < CONFIG['rsi_threshold'] and 
-            sol_indicators['rsi'] < CONFIG['rsi_threshold']
+            btc_rsi < CONFIG['rsi_threshold'] and 
+            sol_rsi < CONFIG['rsi_threshold']
         )
         adx_condition = (
-            btc_indicators.get('adx', 0) > CONFIG['adx_threshold'] and 
-            sol_indicators.get('adx', 0) > CONFIG['adx_threshold']
+            btc_adx > CONFIG['adx_threshold'] and 
+            sol_adx > CONFIG['adx_threshold']
         )
         obv_condition = (
-            btc_indicators['obv'] > CONFIG['obv_threshold'] and 
-            sol_indicators['obv'] > CONFIG['obv_threshold']
+            btc_obv > CONFIG['obv_threshold'] and 
+            sol_obv > CONFIG['obv_threshold']
         )
 
         confidence = 0
@@ -153,8 +220,8 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
                 # In production, this should be cached
                 try:
                     # Try to get historical data from balance if available
-                    sol_historical = balance.get('sol_historical') if balance else None
-                    btc_historical = balance.get('btc_historical') if balance else None
+                    sol_historical = balance.get('coins', {}).get('SOL', {}).get('historical') if balance else None
+                    btc_historical = balance.get('coins', {}).get('BTC', {}).get('historical') if balance else None
                     
                     # If not available in balance, we'll skip profitability prediction for now
                     # (In production, maintain a historical data cache)
@@ -188,131 +255,272 @@ def handle_trade_with_fees(btc_current_price, sol_current_price, balance_usdt, b
         # Add profitability boost
         confidence += profitability_boost
         
-        logger.info(f"Indicators - MACD: {btc_indicators['macd']}, {sol_indicators['macd']} | RSI: {btc_indicators['rsi']}, {sol_indicators['rsi']} | ADX: {btc_indicators.get('adx', 'N/A')}, {sol_indicators.get('adx', 'N/A')} | OBV: {btc_indicators['obv']}, {sol_indicators['obv']} | ML Boost: {ml_confidence_boost:.2f} | Profitability Boost: {profitability_boost:.2f} | Total Confidence: {confidence:.2f}")
+        # Add LLM signal if enabled
+        llm_boost = 0.0
+        llm_signal = None
+        if CONFIG.get('llm_enabled', False):
+            try:
+                from ml.llm_advisor import get_llm_advisor
+                llm_advisor = get_llm_advisor(CONFIG)
+                
+                # Get historical data from balance if available
+                sol_historical = balance.get('coins', {}).get('SOL', {}).get('historical') if balance else None
+                btc_historical = balance.get('coins', {}).get('BTC', {}).get('historical') if balance else None
+                
+                # Get LLM signal (properly awaited in async context)
+                try:
+                    # Directly await the LLM call since we're now in an async function
+                    llm_signal = await llm_advisor.get_trading_signal(
+                        sol_current_price,
+                        btc_current_price,
+                        btc_indicators,
+                        sol_indicators,
+                        balance_usdt,
+                        balance_coin_amount,
+                        sol_historical,
+                        btc_historical,
+                        selected_coin=trade_coin  # Pass the selected trading coin
+                    )
+                    
+                    if llm_signal is None:
+                        logger.debug("LLM signal is None (may be throttled, cached, or failed - check llm_advisor.log)")
+                    
+                    if llm_signal:
+                        llm_signal_str = llm_signal.get('signal', 'HOLD')
+                        llm_confidence = llm_signal.get('confidence_score', 0.5)
+                        
+                        # Determine if LLM agrees with indicators
+                        indicator_direction = 'up' if primary_momentum > 0 else 'down'
+                        llm_direction = 'up' if llm_signal_str == 'BUY' else ('down' if llm_signal_str == 'SELL' else 'hold')
+                        
+                        if llm_direction == 'hold':
+                            # LLM suggests holding - neutral/slight negative
+                            llm_boost = 0.0
+                        elif llm_direction == indicator_direction:
+                            # LLM confirms indicators - positive boost
+                            llm_boost = llm_confidence * CONFIG.get('llm_confidence_weight', 0.3)
+                        else:
+                            # LLM contradicts indicators - negative boost
+                            llm_boost = -llm_confidence * CONFIG.get('llm_confidence_weight', 0.2)
+                        
+                        logger.info(f"LLM Signal: {llm_signal_str}, Confidence: {llm_confidence:.2f}, Boost: {llm_boost:.2f}")
+                        append_log_safe(f"LLM: {llm_signal_str} (confidence: {llm_confidence:.2f}, boost: {llm_boost:+.2f})")
+                except Exception as e:
+                    logger.warning(f"LLM signal skipped due to exception: {e}", exc_info=True)
+                    
+            except Exception as e:
+                logger.error(f"LLM advisor error: {e}")
         
-        # Append to shared logs
+        # Add LLM boost
+        confidence += llm_boost
+        
+        logger.info(
+            f"Indicators - BTC MACD: {btc_indicators.get('macd')}, SOL MACD: {sol_indicators.get('macd')} | "
+            f"RSI BTC: {btc_indicators.get('rsi')}, SOL: {sol_indicators.get('rsi')} | "
+            f"ADX BTC: {btc_indicators.get('adx')}, SOL: {sol_indicators.get('adx')} | "
+            f"OBV BTC: {btc_indicators.get('obv')}, SOL: {sol_indicators.get('obv')} | "
+            f"ML Boost: {ml_confidence_boost:.2f} | Profitability Boost: {profitability_boost:.2f} | "
+            f"LLM Boost: {llm_boost:.2f} | Total Confidence: {confidence:.2f}"
+        )
+
         confidence_message = f"[{get_timestamp()}] Confidence: {confidence:.2f}"
         if ml_prediction:
             confidence_message += f" (ML: {ml_prediction['direction']} @ {ml_prediction['confidence']:.2f})"
         if profitability_prediction:
             confidence_message += f" (Profit: {profitability_prediction['probability']:.1%})"
+        if llm_signal:
+            confidence_message += f" (LLM: {llm_signal.get('signal', 'N/A')} @ {llm_signal.get('confidence_score', 0):.2f})"
         append_log_safe(confidence_message)
 
         if confidence < CONFIG['confidence_threshold']:
             logger.info(f"{get_timestamp()} Confidence too low. Skipping trade.")
-            return balance_usdt, balance_sol, last_trade_time
-        
-        # Additional filter: if profitability model strongly predicts unprofitable, skip trade
+            return balance_usdt, balance_coin_amount, last_trade_time
+
         if CONFIG.get('profitability_prediction_enabled', False) and profitability_prediction:
             min_profitability_threshold = CONFIG.get('min_profitability_threshold', 0.3)
             if profitability_prediction['probability'] < min_profitability_threshold:
                 logger.info(f"{get_timestamp()} Profitability prediction too low ({profitability_prediction['probability']:.1%}). Skipping trade.")
-                return balance_usdt, balance_sol, last_trade_time
+                return balance_usdt, balance_coin_amount, last_trade_time
 
-        volume = calculate_volume(sol_current_price, balance_usdt, CONFIG)
-        trade_action = 'buy' if btc_indicators['momentum'] > 0 else 'sell'
+        if CONFIG.get('llm_enabled', False) and CONFIG.get('llm_final_authority', True):
+            if llm_signal:
+                llm_signal_str = llm_signal.get('signal', 'HOLD')
+                if llm_signal_str == 'HOLD':
+                    msg = f"{get_timestamp()} LLM Advisor says HOLD - vetoing trade (Confidence was: {confidence:.2f})"
+                    logger.info(msg)
+                    append_log_safe(f"?? LLM VETO: HOLD signal blocks trade for {trade_coin}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+
+                indicator_trade_direction = 'buy' if primary_momentum > 0 else 'sell'
+                llm_direction = 'buy' if llm_signal_str == 'BUY' else 'sell'
+                if indicator_trade_direction != llm_direction:
+                    msg = (
+                        f"{get_timestamp()} LLM Advisor disagrees with indicators - vetoing trade. "
+                        f"LLM: {llm_signal_str}, Indicators: {indicator_trade_direction.upper()}"
+                    )
+                    logger.info(msg)
+                    append_log_safe(f"?? LLM VETO: {llm_signal_str} contradicts indicators for {trade_coin}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+
+                logger.info(f"{get_timestamp()} ? LLM Advisor APPROVES trade: {llm_signal_str} on {trade_coin}")
+                append_log_safe(f"? LLM APPROVED: {llm_signal_str} {trade_coin}")
+            else:
+                msg = f"{get_timestamp()} LLM enabled but no signal available - skipping trade for safety"
+                logger.info(msg)
+                append_log_safe(f"?? LLM: No signal, skipping trade for {trade_coin}")
+                return balance_usdt, balance_coin_amount, last_trade_time
+
+        trade_action = 'buy' if primary_momentum > 0 else 'sell'
         trade_fee = CONFIG['trade_fee']
 
-        if trade_action == 'sell' and balance_sol < volume:
-            volume = balance_sol
-        elif trade_action == 'buy' and balance_usdt < volume * sol_current_price * (1 + trade_fee):
-            volume = balance_usdt / (sol_current_price * (1 + trade_fee))
+        volume_limits = CONFIG.get('coin_volume_limits', {}).get(trade_coin, {})
+        min_position_threshold = max(1e-6, volume_limits.get('min', CONFIG.get('min_volume', 0.001)) / 2)
+        reentry_min_usdt = CONFIG.get('reentry_min_usdt', 5)
+
+        if trade_action == 'sell' and balance_coin_amount <= min_position_threshold and balance_usdt >= reentry_min_usdt:
+            logger.info(
+                f"{get_timestamp()} Want to sell but no {trade_coin} ({balance_coin_amount:.6f}). "
+                f"Overriding to buy to enter position (USDT: {balance_usdt:.2f}, min re-entry: {reentry_min_usdt})."
+            )
+            trade_action = 'buy'
+            primary_momentum = max(primary_momentum, 1)
+        elif trade_action == 'buy' and balance_usdt <= 0.01 and balance_coin_amount > 0:
+            logger.info(
+                f"{get_timestamp()} Want to buy but no USDT ({balance_usdt:.2f}). "
+                f"Overriding to sell to free up capital ({trade_coin}: {balance_coin_amount:.6f})."
+            )
+            trade_action = 'sell'
+            primary_momentum = min(primary_momentum, -1)
+
+        logger.info(
+            f"{get_timestamp()} Trade decision: {trade_coin} momentum={primary_momentum:.2f}, Action={trade_action}, "
+            f"Balance: USDT={balance_usdt:.2f}, {trade_coin}={balance_coin_amount:.6f}"
+        )
+
+        if trade_action == 'buy':
+            if balance_usdt <= 0:
+                logger.info(f"{get_timestamp()} Cannot buy: insufficient USDT balance ({balance_usdt:.2f}). Need to sell first.")
+                return balance_usdt, balance_coin_amount, last_trade_time
+            volume = calculate_volume(primary_price, balance_usdt, CONFIG, trade_coin)
+            max_affordable = balance_usdt / (primary_price * (1 + trade_fee))
+            if max_affordable <= 0:
+                logger.info(f"{get_timestamp()} Cannot buy: max affordable volume is non-positive ({max_affordable}).")
+                return balance_usdt, balance_coin_amount, last_trade_time
+            volume = min(volume, max_affordable)
+            logger.info(f"{get_timestamp()} Buy volume calculated: {volume:.6f} {trade_coin} (from {balance_usdt:.2f} USDT)")
+        else:
+            if balance_coin_amount <= 0:
+                logger.info(
+                    f"{get_timestamp()} Cannot sell: insufficient {trade_coin} balance ({balance_coin_amount:.6f}). Need to buy first."
+                )
+                return balance_usdt, balance_coin_amount, last_trade_time
+            coin_value_usd = balance_coin_amount * primary_price
+            volume = calculate_volume(primary_price, coin_value_usd, CONFIG, trade_coin)
+            volume = min(volume, balance_coin_amount)
+            logger.info(
+                f"{get_timestamp()} Sell volume calculated: {volume:.6f} {trade_coin} "
+                f"(from {balance_coin_amount:.6f} {trade_coin} available)"
+            )
 
         if volume <= 0:
             logger.info(f"{get_timestamp()} Volume too low to execute trade: {volume}. Transaction did not go through.")
-            return balance_usdt, balance_sol, last_trade_time
+            return balance_usdt, balance_coin_amount, last_trade_time
 
-        # --- Position-based risk controls (if holding SOL) ---
-        if balance is not None and balance_sol > 0:
-            entry = balance.get('position_entry_price')
-            trailing_high = balance.get('trailing_high_price', entry)
+        if balance is not None and balance_coin_amount > 0:
+            entry = primary_state.get('position_entry_price')
+            trailing_high = primary_state.get('trailing_high_price', entry)
             if entry:
-                # Update trailing high
-                trailing_high = max(trailing_high or entry, sol_current_price)
-                balance['trailing_high_price'] = trailing_high
-                # Stop-loss
+                trailing_high = max(trailing_high or entry, primary_price)
+                primary_state['trailing_high_price'] = trailing_high
                 if CONFIG.get('stop_loss_pct'):
-                    if (entry - sol_current_price) / entry >= CONFIG['stop_loss_pct'] / 100.0:
-                        sell_vol = balance_sol
-                        pre_sol = balance_sol
-                        balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
-                        msg = f"[{get_timestamp()}] Stop-loss triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
+                    if (entry - primary_price) / entry >= CONFIG['stop_loss_pct'] / 100.0:
+                        sell_vol = balance_coin_amount
+                        pre_coin = balance_coin_amount
+                        balance_usdt, balance_coin_amount = execute_trade('sell', sell_vol, primary_price, balance_usdt, balance_coin_amount, trade_fee)
+                        primary_state['amount'] = balance_coin_amount
+                        msg = f"[{get_timestamp()}] Stop-loss triggered. Sold {pre_coin:.6f} {trade_coin} at {primary_price:.2f}"
                         logger.info(msg)
                         append_log_safe(msg)
                         notify(msg)
-                        balance['position_entry_price'] = None
-                        balance['trailing_high_price'] = None
+                        primary_state['position_entry_price'] = None
+                        primary_state['trailing_high_price'] = None
                         last_trade_time = now
-                        return balance_usdt, balance_sol, last_trade_time
-                # Take-profit
+                        return balance_usdt, balance_coin_amount, last_trade_time
                 if CONFIG.get('base_take_profit_pct'):
-                    if (sol_current_price - entry) / entry >= CONFIG['base_take_profit_pct'] / 100.0:
-                        sell_vol = balance_sol
-                        pre_sol = balance_sol
-                        balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
-                        msg = f"[{get_timestamp()}] Take-profit triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
+                    if (primary_price - entry) / entry >= CONFIG['base_take_profit_pct'] / 100.0:
+                        sell_vol = balance_coin_amount
+                        pre_coin = balance_coin_amount
+                        balance_usdt, balance_coin_amount = execute_trade('sell', sell_vol, primary_price, balance_usdt, balance_coin_amount, trade_fee)
+                        primary_state['amount'] = balance_coin_amount
+                        msg = f"[{get_timestamp()}] Take-profit triggered. Sold {pre_coin:.6f} {trade_coin} at {primary_price:.2f}"
                         logger.info(msg)
                         append_log_safe(msg)
                         notify(msg)
-                        balance['position_entry_price'] = None
-                        balance['trailing_high_price'] = None
+                        primary_state['position_entry_price'] = None
+                        primary_state['trailing_high_price'] = None
                         last_trade_time = now
-                        return balance_usdt, balance_sol, last_trade_time
-                # Trailing stop
+                        return balance_usdt, balance_coin_amount, last_trade_time
                 if CONFIG.get('trailing_stop_pct') and trailing_high:
-                    if sol_current_price <= trailing_high * (1 - CONFIG['trailing_stop_pct'] / 100.0):
-                        sell_vol = balance_sol
-                        pre_sol = balance_sol
-                        balance_usdt, balance_sol = execute_trade('sell', sell_vol, sol_current_price, balance_usdt, balance_sol, trade_fee)
-                        msg = f"[{get_timestamp()}] Trailing stop triggered. Sold {pre_sol:.6f} SOL at {sol_current_price:.2f}"
+                    if primary_price <= trailing_high * (1 - CONFIG['trailing_stop_pct'] / 100.0):
+                        sell_vol = balance_coin_amount
+                        pre_coin = balance_coin_amount
+                        balance_usdt, balance_coin_amount = execute_trade('sell', sell_vol, primary_price, balance_usdt, balance_coin_amount, trade_fee)
+                        primary_state['amount'] = balance_coin_amount
+                        msg = f"[{get_timestamp()}] Trailing stop triggered. Sold {pre_coin:.6f} {trade_coin} at {primary_price:.2f}"
                         logger.info(msg)
                         append_log_safe(msg)
                         notify(msg)
-                        balance['position_entry_price'] = None
-                        balance['trailing_high_price'] = None
+                        primary_state['position_entry_price'] = None
+                        primary_state['trailing_high_price'] = None
                         last_trade_time = now
-                        return balance_usdt, balance_sol, last_trade_time
+                        return balance_usdt, balance_coin_amount, last_trade_time
 
-        pre_balance_sol = balance_sol
-        balance_usdt, balance_sol = execute_trade(trade_action, volume, sol_current_price, balance_usdt, balance_sol, trade_fee)
-        # Update position entry/trailing on fresh long entry
-        if balance is not None and trade_action == 'buy' and pre_balance_sol == 0 and balance_sol > 0:
-            balance['position_entry_price'] = sol_current_price
-            balance['trailing_high_price'] = sol_current_price
-        
-        current_total_usd = balance_usdt + balance_sol * sol_current_price
+        pre_balance_coin = balance_coin_amount
+        balance_usdt, balance_coin_amount = execute_trade(trade_action, volume, primary_price, balance_usdt, balance_coin_amount, trade_fee)
+        primary_state['amount'] = balance_coin_amount
+        primary_state['price'] = primary_price
+        if balance is not None and trade_action == 'buy' and pre_balance_coin == 0 and balance_coin_amount > 0:
+            primary_state['position_entry_price'] = primary_price
+            primary_state['trailing_high_price'] = primary_price
+
+        # Update total portfolio metrics
+        current_total_usd = balance_usdt
+        for state in balance['coins'].values():
+            current_total_usd += state.get('amount', 0.0) * state.get('price', 0.0)
         total_gain_usd = current_total_usd - initial_total_usd
-        
-        log_and_print_status({'usdt': balance_usdt, 'sol': balance_sol, 'sol_price': sol_current_price}, current_total_usd, total_gain_usd, trade_action, volume, sol_current_price)
-        
-        # Log trade with context for future learning
+
+        log_and_print_status(balance, current_total_usd, total_gain_usd, coin=trade_coin, trade_action=trade_action, volume=volume, price=primary_price)
+
         try:
             import json
+
             trade_log_entry = {
                 'timestamp': get_timestamp(),
+                'coin': trade_coin,
                 'action': trade_action,
                 'volume': volume,
-                'price': sol_current_price,
+                'price': primary_price,
                 'balance_usdt': balance_usdt,
-                'balance_sol': balance_sol,
+                'balance_coin': balance_coin_amount,
                 'confidence': confidence,
-                'rsi_btc': btc_indicators.get('rsi'),
-                'rsi_sol': sol_indicators.get('rsi'),
-                'macd_btc': btc_indicators.get('macd', [0, 0])[0] if isinstance(btc_indicators.get('macd'), tuple) else 0,
-                'macd_sol': sol_indicators.get('macd', [0, 0])[0] if isinstance(sol_indicators.get('macd'), tuple) else 0,
+                'rsi_primary': primary_indicators.get('rsi'),
+                'rsi_secondary': secondary_indicators.get('rsi'),
+                'macd_primary': (primary_indicators.get('macd') or (0, 0))[0],
+                'macd_secondary': (secondary_indicators.get('macd') or (0, 0))[0],
             }
             if ml_prediction:
                 trade_log_entry['ml_direction'] = ml_prediction.get('direction')
                 trade_log_entry['ml_confidence'] = ml_prediction.get('confidence')
-            
+
             with open('trade_log.json', 'a') as f:
                 json.dump(trade_log_entry, f)
                 f.write('\n')
         except Exception as e:
             logger.debug(f"Error logging trade for learning: {e}")
-        
+
         last_trade_time = now
-        return balance_usdt, balance_sol, last_trade_time
+        balance['last_trade_time'] = last_trade_time
+        return balance_usdt, balance_coin_amount, last_trade_time
     except Exception as e:
         logger.error(f"Error in handle_trade_with_fees: {e}")
-        return balance_usdt, balance_sol, last_trade_time
+        return balance_usdt, balance_coin_amount, last_trade_time
