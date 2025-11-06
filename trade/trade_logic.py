@@ -7,6 +7,11 @@ from utils.alerts import notify
 from utils.shared_state import append_log_safe
 # ML import is lazy-loaded to avoid circular dependencies
 
+# Import notifiers and signal tracker
+from utils.telegram_notifier import get_telegram_notifier
+from utils.whatsapp_notifier import get_whatsapp_notifier
+from utils.signal_tracker import get_signal_tracker
+
 logger = setup_logger('trade_logic_logger', 'trade_logic.log')
 
 def execute_trade(action, volume, price, balance_usdt, balance_coin, trade_fee):
@@ -314,13 +319,103 @@ async def handle_trade_with_fees(
         # Add LLM boost
         confidence += llm_boost
         
+        # Add Deep Analysis if enabled (comprehensive Claude AI + RAG analysis)
+        deep_boost = 0.0
+        deep_analysis = None
+        if CONFIG.get('deep_analysis_enabled', False):
+            try:
+                from ml.deep_analyzer import get_deep_analyzer
+                deep_analyzer = get_deep_analyzer(CONFIG)
+                
+                # Get deep analysis (cached, updates every 2-4 hours)
+                # Convert coin symbol to proper format (BTC -> BTC/USD, SOL -> SOL/USD)
+                analysis_symbol = f"{trade_coin}/USD"
+                
+                # Get historical data from balance if available
+                coin_historical = balance.get('coins', {}).get(trade_coin, {}).get('historical') if balance else None
+                
+                try:
+                    deep_analysis = await deep_analyzer.get_analysis(
+                        symbol=analysis_symbol,
+                        current_price=primary_price,
+                        indicators=primary_indicators,
+                        historical_data=coin_historical,
+                        force_refresh=False  # Use cache if available
+                    )
+                    
+                    if deep_analysis:
+                        # Analyze consensus between fast LLM and deep analysis
+                        deep_action = deep_analysis.recommended_action
+                        deep_confidence = deep_analysis.confidence
+                        deep_trend = deep_analysis.trend
+                        
+                        # Determine if deep analysis agrees with indicators
+                        indicator_direction = 'up' if primary_momentum > 0 else 'down'
+                        deep_direction = 'up' if deep_action == 'BUY' else ('down' if deep_action == 'SELL' else 'hold')
+                        
+                        # Calculate agreement between fast LLM and deep analysis
+                        fast_llm_direction = 'hold'
+                        if llm_signal:
+                            llm_signal_str = llm_signal.get('signal', 'HOLD')
+                            fast_llm_direction = 'up' if llm_signal_str == 'BUY' else ('down' if llm_signal_str == 'SELL' else 'hold')
+                        
+                        agreement_score = 0.0
+                        if fast_llm_direction != 'hold' and deep_direction != 'hold':
+                            if fast_llm_direction == deep_direction:
+                                agreement_score = 1.0  # Perfect agreement
+                            else:
+                                agreement_score = -0.5  # Disagreement
+                        
+                        # Deep analysis boost calculation
+                        if deep_direction == 'hold':
+                            # Deep analysis suggests holding - slight negative
+                            deep_boost = -0.1
+                        elif deep_direction == indicator_direction:
+                            # Deep analysis confirms indicators - strong positive
+                            base_boost = deep_confidence * CONFIG.get('deep_analysis_confidence_weight', 0.35)
+                            # Bonus if fast LLM also agrees
+                            agreement_bonus = agreement_score * 0.15 if agreement_score > 0 else 0
+                            deep_boost = base_boost + agreement_bonus
+                        else:
+                            # Deep analysis contradicts indicators - strong negative
+                            deep_boost = -deep_confidence * CONFIG.get('deep_analysis_confidence_weight', 0.25)
+                        
+                        logger.info(
+                            f"Deep Analysis: {deep_action}, Confidence: {deep_confidence:.2f}, "
+                            f"Trend: {deep_trend}, Boost: {deep_boost:.2f}, "
+                            f"Agreement with Fast LLM: {agreement_score:.2f}"
+                        )
+                        append_log_safe(
+                            f"?? Deep: {deep_action} (conf: {deep_confidence:.2f}, "
+                            f"trend: {deep_trend}, boost: {deep_boost:+.2f})"
+                        )
+                        
+                        # Log key patterns and warnings
+                        if deep_analysis.key_patterns:
+                            logger.info(f"Deep Analysis Patterns: {', '.join(deep_analysis.key_patterns)}")
+                        if deep_analysis.warnings:
+                            logger.warning(f"Deep Analysis Warnings: {', '.join(deep_analysis.warnings)}")
+                            for warning in deep_analysis.warnings:
+                                append_log_safe(f"??  {warning}")
+                    else:
+                        logger.debug("Deep analysis returned None (may be throttled or cached)")
+                        
+                except Exception as e:
+                    logger.warning(f"Deep analysis skipped due to exception: {e}", exc_info=True)
+                    
+            except Exception as e:
+                logger.error(f"Deep analyzer error: {e}")
+        
+        # Add deep analysis boost
+        confidence += deep_boost
+        
         logger.info(
             f"Indicators - BTC MACD: {btc_indicators.get('macd')}, SOL MACD: {sol_indicators.get('macd')} | "
             f"RSI BTC: {btc_indicators.get('rsi')}, SOL: {sol_indicators.get('rsi')} | "
             f"ADX BTC: {btc_indicators.get('adx')}, SOL: {sol_indicators.get('adx')} | "
             f"OBV BTC: {btc_indicators.get('obv')}, SOL: {sol_indicators.get('obv')} | "
             f"ML Boost: {ml_confidence_boost:.2f} | Profitability Boost: {profitability_boost:.2f} | "
-            f"LLM Boost: {llm_boost:.2f} | Total Confidence: {confidence:.2f}"
+            f"LLM Boost: {llm_boost:.2f} | Deep Boost: {deep_boost:.2f} | Total Confidence: {confidence:.2f}"
         )
 
         confidence_message = f"[{get_timestamp()}] Confidence: {confidence:.2f}"
@@ -330,6 +425,8 @@ async def handle_trade_with_fees(
             confidence_message += f" (Profit: {profitability_prediction['probability']:.1%})"
         if llm_signal:
             confidence_message += f" (LLM: {llm_signal.get('signal', 'N/A')} @ {llm_signal.get('confidence_score', 0):.2f})"
+        if deep_analysis:
+            confidence_message += f" (Deep: {deep_analysis.recommended_action} @ {deep_analysis.confidence:.2f})"
         append_log_safe(confidence_message)
 
         if confidence < CONFIG['confidence_threshold']:
@@ -345,6 +442,42 @@ async def handle_trade_with_fees(
         if CONFIG.get('llm_enabled', False) and CONFIG.get('llm_final_authority', True):
             if llm_signal:
                 llm_signal_str = llm_signal.get('signal', 'HOLD')
+                
+                # Check for signal change and send notifications
+                signal_tracker = get_signal_tracker()
+                telegram = get_telegram_notifier()
+                whatsapp = get_whatsapp_notifier()
+                signal_changed, old_signal = signal_tracker.check_signal_change(trade_coin, llm_signal_str)
+                
+                if signal_changed and old_signal:
+                    logger.info(f"Signal changed for {trade_coin}: {old_signal} ? {llm_signal_str}")
+                    # Send notifications with LLM feedback and Deep Analysis
+                    try:
+                        telegram.send_signal_change_alert(
+                            coin=trade_coin,
+                            old_signal=old_signal,
+                            new_signal=llm_signal_str,
+                            price=primary_price,
+                            confidence=confidence,
+                            llm_signal=llm_signal,
+                            deep_analysis=deep_analysis if deep_analysis else None
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send Telegram signal change notification: {e}")
+                    
+                    try:
+                        whatsapp.send_signal_change_alert(
+                            coin=trade_coin,
+                            old_signal=old_signal,
+                            new_signal=llm_signal_str,
+                            price=primary_price,
+                            confidence=confidence,
+                            llm_signal=llm_signal,
+                            deep_analysis=deep_analysis if deep_analysis else None
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send WhatsApp signal change notification: {e}")
+                
                 if llm_signal_str == 'HOLD':
                     msg = f"{get_timestamp()} LLM Advisor says HOLD - vetoing trade (Confidence was: {confidence:.2f})"
                     logger.info(msg)
@@ -369,6 +502,38 @@ async def handle_trade_with_fees(
                 logger.info(msg)
                 append_log_safe(f"?? LLM: No signal, skipping trade for {trade_coin}")
                 return balance_usdt, balance_coin_amount, last_trade_time
+        
+        # Deep Analysis veto power (if enabled and high confidence)
+        if CONFIG.get('deep_analysis_enabled', False) and CONFIG.get('deep_analysis_veto_power', True):
+            if deep_analysis and deep_analysis.confidence >= 0.7:  # High confidence threshold
+                deep_action = deep_analysis.recommended_action
+                indicator_trade_direction = 'buy' if primary_momentum > 0 else 'sell'
+                deep_direction = 'buy' if deep_action == 'BUY' else ('sell' if deep_action == 'SELL' else 'hold')
+                
+                if deep_action == 'HOLD':
+                    msg = (
+                        f"{get_timestamp()} Deep Analysis says HOLD with high confidence "
+                        f"({deep_analysis.confidence:.2f}) - vetoing trade"
+                    )
+                    logger.info(msg)
+                    append_log_safe(f"?? DEEP VETO: HOLD (confidence: {deep_analysis.confidence:.0%})")
+                    if deep_analysis.warnings:
+                        append_log_safe(f"??  Reasons: {'; '.join(deep_analysis.warnings[:2])}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+                
+                if indicator_trade_direction != deep_direction:
+                    msg = (
+                        f"{get_timestamp()} Deep Analysis disagrees with indicators (confidence: {deep_analysis.confidence:.2f}) "
+                        f"- vetoing trade. Deep: {deep_action}, Indicators: {indicator_trade_direction.upper()}"
+                    )
+                    logger.info(msg)
+                    append_log_safe(f"?? DEEP VETO: {deep_action} contradicts {indicator_trade_direction.upper()}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+                
+                logger.info(f"{get_timestamp()} ? Deep Analysis APPROVES trade: {deep_action} (confidence: {deep_analysis.confidence:.2f})")
+                append_log_safe(f"? DEEP APPROVED: {deep_action} {trade_coin} ({deep_analysis.trend})")
+            elif deep_analysis:
+                logger.info(f"{get_timestamp()} Deep Analysis present but confidence too low for veto ({deep_analysis.confidence:.2f})")
 
         trade_action = 'buy' if primary_momentum > 0 else 'sell'
         trade_fee = CONFIG['trade_fee']
@@ -482,6 +647,35 @@ async def handle_trade_with_fees(
         if balance is not None and trade_action == 'buy' and pre_balance_coin == 0 and balance_coin_amount > 0:
             primary_state['position_entry_price'] = primary_price
             primary_state['trailing_high_price'] = primary_price
+        
+        # Send notifications for trade execution
+        try:
+            telegram = get_telegram_notifier()
+            telegram.send_trade_execution_alert(
+                coin=trade_coin,
+                action=trade_action.upper(),
+                amount=volume,
+                price=primary_price,
+                total_value=volume * primary_price,
+                balance_usdt=balance_usdt,
+                balance_coin=balance_coin_amount
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send Telegram trade notification: {e}")
+        
+        try:
+            whatsapp = get_whatsapp_notifier()
+            whatsapp.send_trade_execution_alert(
+                coin=trade_coin,
+                action=trade_action.upper(),
+                amount=volume,
+                price=primary_price,
+                total_value=volume * primary_price,
+                balance_usdt=balance_usdt,
+                balance_coin=balance_coin_amount
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send WhatsApp trade notification: {e}")
 
         # Update total portfolio metrics
         current_total_usd = balance_usdt

@@ -25,3 +25,6 @@ rich>=13.9.4
 numba>=0.61.0
 scipy>=1.15.1
 openai>=1.61.0
+
+# WhatsApp notifications via Twilio
+twilio>=9.0.0

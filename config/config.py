@@ -121,4 +121,19 @@ CONFIG = {
     'llm_final_authority': True,  # Give LLM final veto power - if HOLD, no trade happens
     'llm_confidence_weight': 0.25,  # How much LLM signal contributes to trade decision (0.0-1.0)
     'llm_model_config_path': 'LLM_trader/config/model_config.ini',  # Path to LLM model config
+    
+    # Deep Analysis settings (comprehensive analysis using Claude AI + RAG)
+    'deep_analysis_enabled': True,  # Enable deep analyzer for comprehensive market context
+    'deep_analysis_interval': 7200,  # Analysis interval in seconds (2 hours)
+    'deep_analysis_cache_duration': 7200,  # Cache duration in seconds
+    'deep_analysis_model': os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022'),  # Primary model from .env
+    'deep_analysis_fallback_model': 'anthropic/claude-3.5-sonnet',  # OpenRouter fallback
+    'deep_analysis_confidence_weight': 0.35,  # Weight for deep analysis in trade decisions
+    'deep_analysis_veto_power': True,  # Deep analysis can veto trades if high confidence
+    'deep_analysis_min_agreement': 0.6,  # Minimum agreement between fast/deep for high confidence
+    
+    # API Keys (loaded from environment or .env file)
+    'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY'),
+    'anthropic_model': os.getenv('ANTHROPIC_MODEL', 'claude-3-5-sonnet-20241022'),  # Model name from .env
+    'openrouter_api_key': os.getenv('OPENROUTER_API_KEY'),
 }
