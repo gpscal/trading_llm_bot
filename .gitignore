@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 
 # Environments
+docs/
 .env
 .venv/
 venv/
