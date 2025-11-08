@@ -1,10 +1,10 @@
 #!/bin/bash
-# Uninstall SolBot systemd service
+# Uninstall Trading LLM Bot Dashboard systemd service
 
 set -e
 
-echo "SolBot Service Uninstallation Script"
-echo "==================================="
+echo "Trading LLM Bot Dashboard Service Uninstallation Script"
+echo "======================================================="
 echo ""
 
 # Check if running as root
@@ -14,7 +14,7 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-SYSTEMD_SERVICE="/etc/systemd/system/solbot.service"
+SYSTEMD_SERVICE="/etc/systemd/system/trading_llm_bot_dashboard.service"
 
 # Check if service exists
 if [ ! -f "$SYSTEMD_SERVICE" ]; then
@@ -24,15 +24,15 @@ if [ ! -f "$SYSTEMD_SERVICE" ]; then
 fi
 
 # Stop service if running
-if systemctl is-active --quiet solbot; then
-    echo "Stopping solbot service..."
-    systemctl stop solbot
+if systemctl is-active --quiet trading_llm_bot_dashboard; then
+    echo "Stopping trading_llm_bot_dashboard service..."
+    systemctl stop trading_llm_bot_dashboard
 fi
 
 # Disable service if enabled
-if systemctl is-enabled --quiet solbot 2>/dev/null; then
-    echo "Disabling solbot service..."
-    systemctl disable solbot
+if systemctl is-enabled --quiet trading_llm_bot_dashboard 2>/dev/null; then
+    echo "Disabling trading_llm_bot_dashboard service..."
+    systemctl disable trading_llm_bot_dashboard
 fi
 
 # Remove service file

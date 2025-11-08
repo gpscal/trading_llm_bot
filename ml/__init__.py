@@ -1,5 +1,5 @@
 """
-Machine Learning module for SolBot.
+Machine Learning module for Trading LLM Bot.
 """
 
 from .price_predictor import PricePredictor, LSTMPredictor, TransformerPredictor

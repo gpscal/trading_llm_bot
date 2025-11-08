@@ -1,0 +1,45 @@
+{
+  "template_name": "signal_change_alert",
+  "category": "ALERT_UPDATE",
+  "language": "en",
+  "description": "Notifies users when trading signal changes (BUY/SELL/HOLD)",
+  "template_content": "🚨 *SIGNAL CHANGE ALERT*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n*{{1}}* @ ${{2}}\n🕐 {{3}}\n\n*Signal Update:*\n{{4}} → {{5}} *{{6}}*\n\n*📊 Confidence:* {{7}}\n*🎯 Strategy:* {{8}}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n*🤖 AI Advisor Analysis*\n\nSignal: {{9}} {{10}}\nConfidence: {{11}}\nReasoning: {{12}}\n\n*Risk Management:*\n🛑 Stop Loss: ${{13}}\n🎯 Take Profit: ${{14}}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n_Trading Bot AI • Real-time Alerts_",
+  "variables": {
+    "1": "Coin symbol (e.g., BTC, SOL)",
+    "2": "Current price",
+    "3": "Timestamp",
+    "4": "Old signal emoji (🟡/🟢/🔴)",
+    "5": "Arrow (→)",
+    "6": "New signal (BUY/SELL/HOLD)",
+    "7": "Confidence percentage",
+    "8": "Strategy name",
+    "9": "LLM signal emoji",
+    "10": "LLM signal text",
+    "11": "LLM confidence",
+    "12": "AI reasoning summary",
+    "13": "Stop loss price",
+    "14": "Take profit price"
+  },
+  "example": {
+    "1": "BTC",
+    "2": "75,420.00",
+    "3": "2025-11-07 18:30:15",
+    "4": "🟡",
+    "5": "→",
+    "6": "BUY",
+    "7": "87%",
+    "8": "Momentum Breakout",
+    "9": "🟢",
+    "10": "BUY",
+    "11": "HIGH (90%)",
+    "12": "Strong bullish momentum with RSI recovery from oversold conditions. Volume surge confirms buyer interest.",
+    "13": "73,200.00",
+    "14": "78,500.00"
+  },
+  "notes": [
+    "Maximum 1024 characters per WhatsApp template",
+    "Use markdown formatting (*bold*, _italic_)",
+    "Variables must be in order {{1}}, {{2}}, etc.",
+    "Submit to Twilio Content Template Builder for approval"
+  ]
+}

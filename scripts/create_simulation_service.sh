@@ -6,13 +6,13 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SERVICE_NAME="solbot-simulation"
+SERVICE_NAME="trading_llm_bot_simulation"
 USER_SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$USER_SERVICE_DIR/${SERVICE_NAME}.service"
 VENV_DIR="$PROJECT_ROOT/venv"
 
-echo "SolBot Simulation Service Setup"
-echo "==============================="
+echo "Trading LLM Bot Simulation Service Setup"
+echo "========================================="
 echo ""
 
 # Check if running as regular user (not root)
@@ -41,7 +41,7 @@ echo "Creating service file..."
 # Create the service file
 cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=SolBot Trading Simulation
+Description=Trading LLM Bot Simulation
 After=network.target
 
 [Service]
@@ -64,7 +64,7 @@ RestartSec=10
 # Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=solbot-sim
+SyslogIdentifier=trading_llm_bot_sim
 
 # Security
 NoNewPrivileges=true

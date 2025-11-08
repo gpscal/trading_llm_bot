@@ -1,17 +1,17 @@
 #!/bin/bash
-# Install SolBot systemd service
+# Install Trading LLM Bot Dashboard systemd service
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SERVICE_FILE="$PROJECT_ROOT/solbot.service"
-SYSTEMD_SERVICE="/etc/systemd/system/solbot.service"
+SERVICE_FILE="$PROJECT_ROOT/trading_llm_bot_dashboard.service"
+SYSTEMD_SERVICE="/etc/systemd/system/trading_llm_bot_dashboard.service"
 VENV_DIR="$PROJECT_ROOT/venv"
 LOG_DIR="$PROJECT_ROOT/logs"
 
-echo "SolBot Service Installation Script"
-echo "=================================="
+echo "Trading LLM Bot Dashboard Service Installation Script"
+echo "===================================================="
 echo ""
 
 # Check if running as root
@@ -53,13 +53,13 @@ sed -e "s|%USER%|$INSTALL_USER|g" \
     -e "s|%GROUP%|$INSTALL_GROUP|g" \
     -e "s|%PROJECT_ROOT%|$PROJECT_ROOT|g" \
     -e "s|%VENV_BIN%|$VENV_BIN|g" \
-    "$SERVICE_FILE" > /tmp/solbot.service.tmp
+    "$SERVICE_FILE" > /tmp/trading_llm_bot_dashboard.service.tmp
 
 # Copy service file to systemd
 echo "Installing systemd service file..."
-cp /tmp/solbot.service.tmp "$SYSTEMD_SERVICE"
+cp /tmp/trading_llm_bot_dashboard.service.tmp "$SYSTEMD_SERVICE"
 chmod 644 "$SYSTEMD_SERVICE"
-rm /tmp/solbot.service.tmp
+rm /tmp/trading_llm_bot_dashboard.service.tmp
 
 # Reload systemd
 echo "Reloading systemd daemon..."
@@ -69,14 +69,14 @@ echo ""
 echo "Installation complete!"
 echo ""
 echo "To start the service:"
-echo "  sudo systemctl start solbot"
+echo "  sudo systemctl start trading_llm_bot_dashboard"
 echo ""
 echo "To enable service to start on boot:"
-echo "  sudo systemctl enable solbot"
+echo "  sudo systemctl enable trading_llm_bot_dashboard"
 echo ""
 echo "To check service status:"
-echo "  sudo systemctl status solbot"
+echo "  sudo systemctl status trading_llm_bot_dashboard"
 echo ""
 echo "To view logs:"
-echo "  sudo journalctl -u solbot -f"
+echo "  sudo journalctl -u trading_llm_bot_dashboard -f"
 

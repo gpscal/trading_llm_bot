@@ -12,7 +12,7 @@ import json
 def main():
     """Analyze trade history and print recommendations."""
     print("=" * 60)
-    print("SolBot Trade Outcome Analysis")
+    print("Trading LLM Bot Trade Outcome Analysis")
     print("=" * 60)
     print()
     

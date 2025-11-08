@@ -1,4 +1,4 @@
-# GPU Configuration for SolBot
+# GPU Configuration for Trading LLM Bot
 
 # Enable/disable GPU acceleration
 USE_GPU = True  # Set to False to use CPU fallback

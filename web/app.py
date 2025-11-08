@@ -66,11 +66,18 @@ def start_simulation():
     global _simulation_thread
     import subprocess
     
-    # Check if systemd simulation service is running
+    # Check if systemd simulation service is running (user or system service)
     try:
-        result = subprocess.run(['systemctl', 'is-active', 'solbot-simulation'], 
+        # Try system service first
+        result = subprocess.run(['systemctl', 'is-active', 'trading_llm_bot_simulation'], 
                                capture_output=True, text=True, timeout=2)
         systemd_running = result.returncode == 0 and result.stdout.strip() == 'active'
+        
+        # If not system service, try user service
+        if not systemd_running:
+            result = subprocess.run(['systemctl', '--user', 'is-active', 'trading_llm_bot_simulation'], 
+                                   capture_output=True, text=True, timeout=2)
+            systemd_running = result.returncode == 0 and result.stdout.strip() == 'active'
     except:
         systemd_running = False
     
@@ -110,7 +117,7 @@ def start_simulation():
             update_bot_state_safe({'running': False, 'mode': None})
     
     # Use non-daemon thread so it persists independently of the web server
-    _simulation_thread = threading.Thread(target=run_simulation, daemon=False, name="SolBot-Simulation")
+    _simulation_thread = threading.Thread(target=run_simulation, daemon=False, name="TradingLLMBot-Simulation")
     _simulation_thread.start()
     update_bot_state_safe({'running': True, 'mode': 'simulation'})
     # Emit WebSocket update
@@ -135,7 +142,7 @@ def start_live():
                 update_bot_state_safe({'running': False, 'mode': None})
         
         # Use non-daemon thread so it persists independently of the web server
-        _live_trading_thread = threading.Thread(target=run_live_trading, daemon=False, name="SolBot-LiveTrading")
+        _live_trading_thread = threading.Thread(target=run_live_trading, daemon=False, name="TradingLLMBot-LiveTrading")
         _live_trading_thread.start()
         update_bot_state_safe({'running': True, 'mode': 'live'})
         # Emit WebSocket update
@@ -150,7 +157,7 @@ def stop():
     # Check if systemd simulation service is running
     systemd_running = False
     try:
-        result = subprocess.run(['systemctl', 'is-active', 'solbot-simulation'], 
+        result = subprocess.run(['systemctl', 'is-active', 'trading_llm_bot_simulation'], 
                                capture_output=True, text=True, timeout=2)
         systemd_running = result.returncode == 0 and result.stdout.strip() == 'active'
     except:
@@ -162,8 +169,13 @@ def stop():
     # Stop systemd service if running
     if systemd_running:
         try:
-            subprocess.run(['sudo', 'systemctl', 'stop', 'solbot-simulation'], 
-                         capture_output=True, timeout=5)
+            # Try to stop system service first
+            result = subprocess.run(['sudo', 'systemctl', 'stop', 'trading_llm_bot_simulation'], 
+                                  capture_output=True, timeout=5)
+            # If system service not found, try user service
+            if result.returncode != 0:
+                subprocess.run(['systemctl', '--user', 'stop', 'trading_llm_bot_simulation'], 
+                             capture_output=True, timeout=5)
             update_bot_state_safe({'running': False, 'mode': None})
             socketio.emit('status_update', get_bot_state_safe())
             return jsonify({"status": "Stopped systemd simulation service"})
@@ -182,12 +194,19 @@ def stop():
 def get_status():
     import subprocess
     
-    # Check if systemd simulation service is running
+    # Check if systemd simulation service is running (user or system)
     systemd_running = False
     try:
-        result = subprocess.run(['systemctl', 'is-active', 'solbot-simulation'], 
+        # Try system service first
+        result = subprocess.run(['systemctl', 'is-active', 'trading_llm_bot_simulation'], 
                                capture_output=True, text=True, timeout=2)
         systemd_running = result.returncode == 0 and result.stdout.strip() == 'active'
+        
+        # If not system service, try user service
+        if not systemd_running:
+            result = subprocess.run(['systemctl', '--user', 'is-active', 'trading_llm_bot_simulation'], 
+                                   capture_output=True, text=True, timeout=2)
+            systemd_running = result.returncode == 0 and result.stdout.strip() == 'active'
     except:
         pass
     

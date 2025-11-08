@@ -39,7 +39,7 @@ CONFIG = {
     },
     'reentry_min_usdt': 5,
     'poll_interval': 5,
-    'cooldown_period': 1,
+    'cooldown_period': 300,  # 5 minutes between trades (was 1 second - too short!)
     'api_key': os.getenv('API_KEY'),
     'api_secret': os.getenv('API_SECRET'),
     'base_url': 'https://api.kraken.com',
@@ -71,7 +71,7 @@ CONFIG = {
     'stochastic_period': 14,
     'adx_period': 14,
     'trade_fee': 0.003,
-    'confidence_threshold': 0.01,  # Lowered further (from 0.05) to allow trades with minimal confidence
+    'confidence_threshold': 0.35,  # Increased to require stronger signals (was 0.01 - too low!)
     'rsi_threshold': 40,  # Lowered (from 55) to make RSI condition easier to meet
     'macd_threshold': {
         'btc': -50,  # Lowered (from -100) for easier MACD condition
@@ -131,6 +131,17 @@ CONFIG = {
     'deep_analysis_confidence_weight': 0.35,  # Weight for deep analysis in trade decisions
     'deep_analysis_veto_power': True,  # Deep analysis can veto trades if high confidence
     'deep_analysis_min_agreement': 0.6,  # Minimum agreement between fast/deep for high confidence
+    
+    # News API settings (NewsAPI.ai integration for sentiment analysis)
+    'news_api_enabled': True,  # Enable news fetching and sentiment analysis
+    'news_api_key': os.getenv('NEWS_API_AI'),  # NewsAPI.ai API key
+    'news_api_base_url': 'https://eventregistry.org/api/v1',  # NewsAPI.ai base URL
+    'news_api_cache_duration': 3600,  # Cache news for 1 hour (news changes less frequently)
+    'news_api_rate_limit': 100,  # Max requests per day (adjust based on your plan)
+    'news_api_max_articles': 10,  # Maximum articles to fetch per request
+    'news_api_timeout': 15,  # Request timeout in seconds
+    'news_crypto_keywords': ['bitcoin', 'ethereum', 'solana', 'crypto', 'cryptocurrency', 'blockchain'],
+    'news_sentiment_weight': 0.15,  # How much news sentiment affects trading decisions
     
     # API Keys (loaded from environment or .env file)
     'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY'),

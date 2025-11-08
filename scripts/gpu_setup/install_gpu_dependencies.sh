@@ -1,9 +1,9 @@
 #!/bin/bash
-# Install GPU dependencies for SolBot
+# Install GPU dependencies for Trading LLM Bot
 
 set -e
 
-echo "SolBot GPU Setup Script"
+echo "Trading LLM Bot GPU Setup Script"
 echo "======================="
 echo ""
 

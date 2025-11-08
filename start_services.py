@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Unified launcher for SolBot web services.
+"""Unified launcher for Trading LLM Bot web services.
 
 Run the Flask control API (`web/app.py`) which serves both the REST API
 and the HTML/CSS/JS dashboard. Child processes are spawned with the

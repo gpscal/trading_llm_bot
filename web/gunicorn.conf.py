@@ -1,5 +1,5 @@
 """
-Gunicorn configuration file for SolBot Flask-SocketIO application.
+Gunicorn configuration file for Trading LLM Bot Dashboard Flask-SocketIO application.
 
 This configuration uses eventlet workers which are required for Flask-SocketIO
 WebSocket functionality.
@@ -34,7 +34,7 @@ loglevel = os.getenv('LOG_LEVEL', 'info')
 access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" %(D)s'
 
 # Process naming
-proc_name = 'solbot'
+proc_name = 'trading_llm_bot_dashboard'
 
 # Server mechanics
 daemon = False
@@ -63,7 +63,7 @@ def on_starting(server):
 
 def when_ready(server):
     """Called just after the server is started."""
-    server.log.info("SolBot server is ready. Spawning workers")
+    server.log.info("Trading LLM Bot Dashboard server is ready. Spawning workers")
 
 def worker_int(worker):
     """Called when a worker receives INT or QUIT signal."""
@@ -98,5 +98,5 @@ def worker_abort(worker):
 
 def on_exit(server):
     """Called just before exiting Gunicorn."""
-    server.log.info("Shutting down: SolBot")
+    server.log.info("Shutting down: Trading LLM Bot Dashboard")
 

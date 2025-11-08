@@ -1,5 +1,5 @@
 """
-LLM Trading Advisor - Integrates LLM_trader with SolBot
+LLM Trading Advisor - Integrates LLM_trader with Trading LLM Bot
 Provides LLM-based trading signals that complement existing indicators
 """
 import os
@@ -9,16 +9,16 @@ import time
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
-# Add parent directory to path for SolBot imports (must be before LLM_trader)
+# Add parent directory to path for Trading LLM Bot imports (must be before LLM_trader)
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# Import SolBot utilities first
+# Import Trading LLM Bot utilities first
 from utils.logger import setup_logger
 from utils.shared_state import append_log_safe
 
-# Add LLM_trader to path (after SolBot imports to avoid conflicts)
+# Add LLM_trader to path (after Trading LLM Bot imports to avoid conflicts)
 llm_trader_path = os.path.join(os.path.dirname(__file__), '..', 'LLM_trader')
 if llm_trader_path not in sys.path:
     sys.path.insert(0, llm_trader_path)
@@ -33,7 +33,7 @@ _min_call_interval = 60  # Minimum 60 seconds between calls
 
 
 class LLMAdvisor:
-    """LLM-based trading advisor that integrates with SolBot"""
+    """LLM-based trading advisor that integrates with Trading LLM Bot"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -59,11 +59,11 @@ class LLMAdvisor:
             original_cwd = os.getcwd()
             original_path = sys.path.copy()
             
-            # Preserve all paths but reorder: LLM_trader first, remove SolBot parent_dir
+            # Preserve all paths but reorder: LLM_trader first, remove Trading LLM Bot parent_dir
             # Keep venv paths (site-packages) for dependencies
             # Just reorder instead of replacing completely
             
-            # Remove SolBot parent_dir temporarily
+            # Remove Trading LLM Bot parent_dir temporarily
             if parent_dir in sys.path:
                 sys.path.remove(parent_dir)
             
@@ -87,7 +87,7 @@ class LLMAdvisor:
                             pass
                 
                 # Import LLM_trader utils modules using absolute paths to avoid conflicts
-                # We need to import them from LLM_trader's utils, not SolBot's
+                # We need to import them from LLM_trader's utils, not Trading LLM Bot's
                 import importlib.util
                 
                 # Load utils.dataclass first (model_manager needs it)
@@ -217,7 +217,7 @@ class LLMAdvisor:
             return None
         
         try:
-            # Build prompt context from SolBot data
+            # Build prompt context from Trading LLM Bot data
             logger.debug(f"Building LLM prompt context for {selected_coin}...")
             prompt_context = self._build_prompt_context(
                 sol_price, btc_price, btc_indicators, sol_indicators,
@@ -286,7 +286,7 @@ class LLMAdvisor:
         btc_historical: Optional[List] = None,
         selected_coin: str = 'SOL'
     ):
-        """Build LLM prompt context from SolBot data structures"""
+        """Build LLM prompt context from Trading LLM Bot data structures"""
         # Use stored classes from initialization
         PromptContext = self._PromptContext
         TechnicalSnapshot = self._TechnicalSnapshot
@@ -366,9 +366,9 @@ class LLMAdvisor:
                 bb_middle=bb_middle,
                 bb_lower=bb_lower,
                 
-                hurst=0.5,  # Not calculated in SolBot
-                kurtosis=0.0,  # Not calculated in SolBot
-                zscore=0.0  # Not calculated in SolBot
+                hurst=0.5,  # Not calculated in Trading LLM Bot
+                kurtosis=0.0,  # Not calculated in Trading LLM Bot
+                zscore=0.0  # Not calculated in Trading LLM Bot
             )
         except Exception as e:
             logger.warning(f"Error building technical snapshot for {selected_coin}: {e}", exc_info=True)
@@ -407,7 +407,7 @@ class LLMAdvisor:
             ohlcv_candles=ohlcv_candles,
             technical_data=technical_snapshot,
             market_metrics=market_metrics,
-            current_position=None,  # SolBot doesn't track positions in this format
+            current_position=None,  # Trading LLM Bot doesn't track positions in this format
             sentiment=None,  # Optional - could fetch Fear & Greed Index
             trade_history=[],
             previous_response=""

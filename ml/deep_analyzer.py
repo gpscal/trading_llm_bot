@@ -44,6 +44,7 @@ class DeepAnalysisResult:
     # Market context
     sentiment_score: Optional[float]  # Fear & Greed Index
     news_summary: Optional[str]
+    news_sentiment: Optional[Dict[str, Any]]  # News sentiment data from NewsAPI.ai
     macro_trend: str  # Long-term trend assessment
     
     # Risk assessment
@@ -234,18 +235,47 @@ class DeepAnalyzer:
         enhanced_data = {
             'fear_greed_index': None,
             'news_summary': None,
+            'news_sentiment': None,
             'market_metrics': {}
         }
         
         try:
-            # Fetch Fear & Greed Index
-            fear_greed = await self._fetch_fear_greed_index()
+            # Fetch Fear & Greed Index and News in parallel for better performance
+            fear_greed_task = self._fetch_fear_greed_index()
+            news_task = self._fetch_crypto_news(symbol)
+            
+            # Await both tasks
+            fear_greed, news_data = await asyncio.gather(
+                fear_greed_task,
+                news_task,
+                return_exceptions=True
+            )
+            
+            # Handle Fear & Greed result
+            if isinstance(fear_greed, Exception):
+                logger.warning(f"Error fetching Fear & Greed: {fear_greed}")
+                fear_greed = None
             enhanced_data['fear_greed_index'] = fear_greed
             
-            # TODO: Add news fetching (CryptoCompare API)
-            # For now, we'll skip news to keep it simple initially
+            # Handle News result
+            if isinstance(news_data, Exception):
+                logger.warning(f"Error fetching news: {news_data}")
+                news_data = None
             
-            logger.debug(f"Enhanced data gathered for {symbol}: Fear&Greed={fear_greed}")
+            if news_data:
+                enhanced_data['news_summary'] = news_data.get('summary')
+                enhanced_data['news_sentiment'] = {
+                    'score': news_data.get('sentiment_score', 0.0),
+                    'label': news_data.get('sentiment_label', 'NEUTRAL'),
+                    'article_count': news_data.get('article_count', 0),
+                    'top_headlines': news_data.get('top_headlines', [])
+                }
+                logger.debug(f"News sentiment for {symbol}: {news_data.get('sentiment_label')} "
+                           f"(score: {news_data.get('sentiment_score', 0):.2f})")
+            
+            logger.debug(f"Enhanced data gathered for {symbol}: "
+                        f"Fear&Greed={fear_greed}, "
+                        f"News={news_data.get('sentiment_label') if news_data else 'N/A'}")
             
         except Exception as e:
             logger.warning(f"Error gathering enhanced data: {e}")
@@ -270,6 +300,220 @@ class DeepAnalyzer:
             logger.debug(f"Failed to fetch Fear & Greed Index: {e}")
         
         return None
+    
+    async def _fetch_crypto_news(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch cryptocurrency news from NewsAPI.ai and analyze sentiment
+        
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USD', 'SOL/USD')
+        
+        Returns:
+            Dictionary containing news summary, sentiment, and article count
+        """
+        # Check if news API is enabled and configured
+        if not self.config.get('news_api_enabled', False):
+            logger.debug("News API not enabled")
+            return None
+        
+        news_api_key = self.config.get('news_api_key')
+        if not news_api_key:
+            logger.warning("News API key not configured (NEWS_API_AI)")
+            return None
+        
+        # Check cache first
+        cache_key = f"news_{symbol}"
+        current_time = time.time()
+        cache_duration = self.config.get('news_api_cache_duration', 3600)
+        
+        if cache_key in self._cache:
+            cached_data = self._cache[cache_key]
+            if current_time - cached_data.get('timestamp', 0) < cache_duration:
+                logger.debug(f"Using cached news data for {symbol}")
+                return cached_data.get('data')
+        
+        try:
+            # Extract coin name from symbol (e.g., 'BTC/USD' -> 'bitcoin')
+            coin = symbol.split('/')[0].upper()
+            coin_keywords = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum', 
+                'SOL': 'solana',
+                'XRP': 'ripple',
+                'ADA': 'cardano',
+                'DOGE': 'dogecoin',
+                'MATIC': 'polygon'
+            }
+            
+            # Get primary keyword for this coin, fallback to generic crypto
+            primary_keyword = coin_keywords.get(coin, 'cryptocurrency')
+            
+            # Build query with additional crypto keywords
+            keywords = self.config.get('news_crypto_keywords', ['crypto', 'cryptocurrency'])
+            if primary_keyword not in keywords:
+                keywords = [primary_keyword] + keywords[:2]  # Add primary + top 2 general terms
+            
+            # NewsAPI.ai query parameters
+            base_url = self.config.get('news_api_base_url', 'https://eventregistry.org/api/v1')
+            max_articles = self.config.get('news_api_max_articles', 10)
+            timeout = self.config.get('news_api_timeout', 15)
+            
+            # Build request for recent articles
+            session = await self._get_session()
+            
+            # NewsAPI.ai article search endpoint
+            url = f"{base_url}/article/getArticles"
+            params = {
+                'apiKey': news_api_key,
+                'keyword': primary_keyword,
+                'articlesPage': 1,
+                'articlesCount': max_articles,
+                'articlesSortBy': 'date',
+                'articlesSortByAsc': 'false',  # Must be string, not boolean
+                'lang': 'eng',
+                'isDuplicateFilter': 'skipDuplicates',
+                'resultType': 'articles'
+            }
+            
+            logger.debug(f"Fetching news for {symbol} (keyword: {primary_keyword})")
+            
+            async with session.get(url, params=params, timeout=timeout) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.warning(f"News API returned status {response.status}: {error_text[:200]}")
+                    return None
+                
+                data = await response.json()
+                
+                # Parse NewsAPI.ai response
+                if 'articles' not in data or 'results' not in data['articles']:
+                    logger.debug(f"No articles found in News API response for {symbol}")
+                    return None
+                
+                articles = data['articles']['results']
+                
+                if not articles or len(articles) == 0:
+                    logger.debug(f"No articles returned for {symbol}")
+                    return None
+                
+                # Analyze sentiment from articles
+                sentiment_analysis = self._analyze_news_sentiment(articles, coin)
+                
+                # Build result
+                result = {
+                    'article_count': len(articles),
+                    'sentiment_score': sentiment_analysis['sentiment_score'],  # -1.0 to 1.0
+                    'sentiment_label': sentiment_analysis['sentiment_label'],  # BULLISH/BEARISH/NEUTRAL
+                    'summary': sentiment_analysis['summary'],
+                    'top_headlines': [
+                        {
+                            'title': article.get('title', ''),
+                            'source': article.get('source', {}).get('title', 'Unknown'),
+                            'url': article.get('url', ''),
+                            'date': article.get('dateTime', '')
+                        }
+                        for article in articles[:5]  # Top 5 headlines
+                    ],
+                    'timestamp': current_time
+                }
+                
+                # Cache the result
+                self._cache[cache_key] = {
+                    'timestamp': current_time,
+                    'data': result
+                }
+                
+                logger.info(f"Fetched {len(articles)} news articles for {symbol}: "
+                          f"{sentiment_analysis['sentiment_label']} sentiment "
+                          f"(score: {sentiment_analysis['sentiment_score']:.2f})")
+                
+                return result
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"News API request timed out for {symbol}")
+        except Exception as e:
+            logger.warning(f"Error fetching crypto news for {symbol}: {e}", exc_info=True)
+        
+        return None
+    
+    def _analyze_news_sentiment(self, articles: List[Dict], coin: str) -> Dict[str, Any]:
+        """
+        Analyze sentiment from news articles
+        
+        Args:
+            articles: List of article data from NewsAPI.ai
+            coin: Coin symbol (e.g., 'BTC', 'SOL')
+        
+        Returns:
+            Dictionary with sentiment score, label, and summary
+        """
+        if not articles:
+            return {
+                'sentiment_score': 0.0,
+                'sentiment_label': 'NEUTRAL',
+                'summary': 'No recent news available'
+            }
+        
+        # Sentiment keywords (simple keyword-based analysis)
+        bullish_keywords = [
+            'surge', 'rally', 'gain', 'rise', 'bull', 'bullish', 'soar', 'pump',
+            'breakout', 'growth', 'profit', 'adoption', 'upgrade', 'milestone',
+            'positive', 'optimistic', 'breakthrough', 'success', 'innovation'
+        ]
+        
+        bearish_keywords = [
+            'crash', 'plunge', 'drop', 'fall', 'bear', 'bearish', 'dump', 'decline',
+            'loss', 'sell-off', 'panic', 'fear', 'scam', 'hack', 'regulation',
+            'negative', 'concern', 'risk', 'warning', 'investigation'
+        ]
+        
+        sentiment_scores = []
+        headlines = []
+        
+        for article in articles:
+            title = article.get('title', '').lower()
+            body = article.get('body', '').lower()[:500]  # First 500 chars of body
+            text = f"{title} {body}"
+            
+            # Count sentiment keywords
+            bullish_count = sum(1 for keyword in bullish_keywords if keyword in text)
+            bearish_count = sum(1 for keyword in bearish_keywords if keyword in text)
+            
+            # Calculate article sentiment score (-1 to 1)
+            total_count = bullish_count + bearish_count
+            if total_count > 0:
+                article_sentiment = (bullish_count - bearish_count) / total_count
+            else:
+                article_sentiment = 0.0  # Neutral if no keywords found
+            
+            sentiment_scores.append(article_sentiment)
+            headlines.append(article.get('title', 'Untitled'))
+        
+        # Calculate average sentiment
+        avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.0
+        
+        # Classify sentiment
+        if avg_sentiment > 0.2:
+            sentiment_label = 'BULLISH'
+        elif avg_sentiment < -0.2:
+            sentiment_label = 'BEARISH'
+        else:
+            sentiment_label = 'NEUTRAL'
+        
+        # Generate summary
+        summary = f"Analyzed {len(articles)} recent articles. "
+        if sentiment_label == 'BULLISH':
+            summary += "Overall sentiment is positive with mentions of gains, adoption, and growth."
+        elif sentiment_label == 'BEARISH':
+            summary += "Overall sentiment is negative with concerns about declines, risks, or regulations."
+        else:
+            summary += "Mixed or neutral sentiment in recent news coverage."
+        
+        return {
+            'sentiment_score': avg_sentiment,
+            'sentiment_label': sentiment_label,
+            'summary': summary
+        }
     
     def _calculate_advanced_indicators(
         self,
@@ -458,6 +702,22 @@ class DeepAnalyzer:
             fg = enhanced_data['fear_greed_index']
             fear_greed_text = f"\n- Fear & Greed Index: {fg['value']}/100 ({fg['classification']})"
         
+        # News sentiment context
+        news_text = ""
+        if enhanced_data.get('news_sentiment'):
+            news = enhanced_data['news_sentiment']
+            news_text = f"\n- News Sentiment: {news['label']} (score: {news['score']:.2f}, {news['article_count']} articles)"
+            
+            # Add top headlines if available
+            if news.get('top_headlines'):
+                news_text += "\n- Recent Headlines:"
+                for headline in news['top_headlines'][:3]:  # Top 3
+                    news_text += f"\n  • {headline['title'][:80]}..." if len(headline['title']) > 80 else f"\n  • {headline['title']}"
+            
+            # Add news summary
+            if enhanced_data.get('news_summary'):
+                news_text += f"\n- News Summary: {enhanced_data['news_summary']}"
+        
         # Divergence context
         divergence_text = ""
         if divergences:
@@ -491,7 +751,7 @@ ADVANCED ANALYSIS:
 - Trend Strength Score: {advanced_indicators['trend_strength']:.2f}
 - Volume Profile: {advanced_indicators['volume_profile']}
 
-MARKET SENTIMENT:{fear_greed_text}{divergence_text}{pattern_text}
+MARKET SENTIMENT:{fear_greed_text}{news_text}{divergence_text}{pattern_text}
 
 Please provide a detailed analysis in JSON format with the following structure:
 {{
@@ -755,6 +1015,7 @@ Provide your analysis as valid JSON only, no additional text."""
             
             sentiment_score=sentiment_score,
             news_summary=enhanced_data.get('news_summary'),
+            news_sentiment=enhanced_data.get('news_sentiment'),
             macro_trend=ai_analysis.get('macro_trend', 'Unknown'),
             
             risk_level=ai_analysis.get('risk_level', 'MEDIUM'),

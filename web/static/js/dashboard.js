@@ -1,4 +1,4 @@
-// SolBot Dashboard JavaScript
+// Trading LLM Bot Dashboard JavaScript
 
 const API_BASE_URL = window.location.origin;
 let socket = null;
