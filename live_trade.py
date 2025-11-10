@@ -1,8 +1,21 @@
 import asyncio
 import argparse
-from api.kraken import get_ticker
-from utils.balance import initialize_balances
 from config.config import CONFIG
+
+# Import based on configured exchange
+exchange = CONFIG.get('exchange', 'kraken')
+if exchange == 'okx':
+    from api.okx import get_ticker
+    from utils.okx_balance import initialize_balances
+elif exchange == 'coinbase':
+    from api.coinbase import get_ticker
+    from utils.coinbase_balance import initialize_balances
+elif exchange == 'bybit':
+    from api.bybit import get_ticker
+    from utils.bybit_balance import initialize_balances
+else:
+    from api.kraken import get_ticker
+    from utils.balance import initialize_balances
 from utils.logger import setup_logger
 from utils.data_fetchers import fetch_initial_price, fetch_and_analyze_historical_data
 from utils.shared_state import update_bot_state_safe

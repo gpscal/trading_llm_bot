@@ -96,6 +96,8 @@ class WhatsAppNotifier:
             return False
         
         try:
+            import json
+            
             msg_params = {
                 'from_': self.from_number,
                 'to': self.to_number
@@ -105,7 +107,9 @@ class WhatsAppNotifier:
                 # Use Content Template (preferred method)
                 msg_params['content_sid'] = content_sid
                 if variables:
-                    msg_params['content_variables'] = str(variables)
+                    # Twilio expects content_variables as a JSON string
+                    msg_params['content_variables'] = json.dumps(variables)
+                    logger.debug(f"Sending template with {len(variables)} variables")
             else:
                 # Use legacy template method
                 msg_params['body'] = template_name
@@ -115,7 +119,7 @@ class WhatsAppNotifier:
             
             msg = self.client.messages.create(**msg_params)
             
-            logger.info(f"WhatsApp template message sent successfully (SID: {msg.sid})")
+            logger.info(f"WhatsApp template message sent successfully (SID: {msg.sid}, Template: {template_name})")
             return True
                 
         except Exception as e:
@@ -371,6 +375,113 @@ class WhatsAppNotifier:
         
         return self.send_message(message)
     
+    def _prepare_deep_analysis_variables(
+        self,
+        coin: str,
+        price: float,
+        analysis: Dict[str, Any]
+    ) -> Dict[str, str]:
+        """Prepare template variables for deep market analysis"""
+        # Extract data
+        trend = analysis.get('trend', 'NEUTRAL')
+        action = analysis.get('recommended_action', 'HOLD')
+        confidence = analysis.get('confidence', 0.0)
+        risk_level = analysis.get('risk_level', 'MEDIUM')
+        # STRICT character limit to stay under 1600 char WhatsApp limit
+        reasoning = analysis.get('reasoning', 'No reasoning provided')[:115]  # Max 115 chars
+        
+        key_indicators = analysis.get('key_indicators', {})
+        rsi = key_indicators.get('rsi', 50.0)
+        adx = key_indicators.get('adx', 20.0)
+        volatility = key_indicators.get('volatility_ratio', 0.015)
+        
+        support = analysis.get('support_levels', [])
+        resistance = analysis.get('resistance_levels', [])
+        
+        # Emoji mappings
+        action_emoji = {'BUY': '🟢', 'SELL': '🔴', 'HOLD': '🟡'}
+        trend_emoji = {'BULLISH': '📈', 'BEARISH': '📉', 'NEUTRAL': '➡️'}
+        risk_emoji = {'LOW': '🟢', 'MEDIUM': '🟡', 'HIGH': '🔴'}
+        
+        # Status text
+        rsi_status = "Oversold" if rsi < 30 else ("Overbought" if rsi > 70 else "Neutral")
+        adx_status = "Strong trend" if adx > 25 else "Weak trend"
+        vol_status = "High" if volatility > 0.02 else ("Low" if volatility < 0.01 else "Moderate")
+        
+        # Market sentiment
+        sentiment_score = analysis.get('sentiment_score', 0.5)
+        sentiment_value = int(sentiment_score * 100)
+        fg_text = (
+            "Extreme Fear" if sentiment_value < 25 else
+            "Fear" if sentiment_value < 45 else
+            "Neutral" if sentiment_value < 55 else
+            "Greed" if sentiment_value < 75 else
+            "Extreme Greed"
+        )
+        
+        # News sentiment
+        news_sentiment = analysis.get('news_sentiment', {})
+        news_label = news_sentiment.get('label', 'NEUTRAL')
+        news_emoji = {'BULLISH': '📰🟢', 'BEARISH': '📰🔴', 'NEUTRAL': '📰⚪'}
+        article_count = news_sentiment.get('article_count', 0)
+        
+        # Headlines - STRICT limit for WhatsApp 1600 char limit
+        headlines = news_sentiment.get('top_headlines', [])
+        headlines_text = ""
+        for i, headline in enumerate(headlines[:3], 1):
+            title = headline.get('title', 'No title')[:25]  # Max 25 chars per headline
+            headlines_text += f"• {title}\n"
+        # Ensure total headlines don't exceed 85 chars
+        if len(headlines_text) > 85:
+            headlines_text = headlines_text[:82] + "..."
+        
+        # Patterns and warnings - STRICT limit
+        patterns = analysis.get('key_patterns', [])
+        warnings = analysis.get('warnings', [])
+        patterns_text = ""
+        for pattern in patterns[:2]:  # Only 2 patterns instead of 3
+            patterns_text += f"• {pattern[:20]}\n"  # Max 20 chars per pattern
+        for warning in warnings[:1]:  # Only 1 warning instead of 2
+            patterns_text += f"⚠️ {warning[:25]}\n"  # Max 25 chars for warning
+        # Ensure total patterns don't exceed 70 chars
+        if len(patterns_text) > 70:
+            patterns_text = patterns_text[:67] + "..."
+        
+        # Build variables dictionary (matching template structure)
+        return {
+            "1": coin,
+            "2": f"{price:,.2f}",
+            "3": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "4": action_emoji.get(action, '⚪'),
+            "5": action,
+            "6": f"{confidence:.0%}",
+            "7": trend_emoji.get(trend, '⚪'),
+            "8": trend,
+            "9": risk_emoji.get(risk_level, '⚪'),
+            "10": risk_level,
+            "11": f"{rsi:.1f}",
+            "12": rsi_status,
+            "13": "Bullish crossover" if trend == 'BULLISH' else ("Bearish crossover" if trend == 'BEARISH' else "Neutral"),
+            "14": f"{adx:.1f}",
+            "15": adx_status,
+            "16": vol_status,
+            "17": "Above average" if volatility > 0.015 else "Below average",
+            "18": f"{support[0]:,.2f}" if support else f"{price * 0.97:,.2f}",
+            "19": f"{resistance[0]:,.2f}" if resistance else f"{price * 1.03:,.2f}",
+            "20": f"{analysis.get('stop_loss_suggestion', price * 0.96):,.2f}",
+            "21": f"{analysis.get('take_profit_suggestion', price * 1.04):,.2f}",
+            "22": reasoning,
+            "23": f"Fear & Greed: {sentiment_value}/100 ({fg_text})",
+            "24": analysis.get('macro_trend', 'Market showing mixed signals')[:50],  # Max 50 chars
+            "25": patterns_text if patterns_text else "• No patterns",
+            "26": analysis.get('ai_model_used', 'AI Bot')[:15],  # Max 15 chars
+            "27": analysis.get('news_summary', 'No news available')[:40],  # Max 40 chars
+            "28": news_emoji.get(news_label, '📰⚪'),
+            "29": news_label,
+            "30": str(article_count),
+            "31": headlines_text if headlines_text else "• No headlines"
+        }
+    
     def send_deep_analysis_report(
         self,
         coin: str,
@@ -392,6 +503,45 @@ class WhatsAppNotifier:
             return False
         
         try:
+            # Try template mode first if enabled
+            if self.use_templates:
+                try:
+                    import json
+                    
+                    # Load template config to get Content SID
+                    config_path = 'whatsapp_templates/template_config.json'
+                    if os.path.exists(config_path):
+                        with open(config_path, 'r') as f:
+                            template_config = json.load(f)
+                        
+                        deep_analysis_config = template_config.get('templates', {}).get('deep_market_analysis', {})
+                        content_sid = deep_analysis_config.get('content_sid', '')
+                        
+                        if content_sid and deep_analysis_config.get('status') == 'approved':
+                            # Prepare template variables according to the template structure
+                            variables = self._prepare_deep_analysis_variables(coin, price, analysis)
+                            
+                            # Send using approved template
+                            result = self.send_template_message(
+                                template_name="deep_market_analysis",
+                                variables=variables,
+                                content_sid=content_sid
+                            )
+                            
+                            if result:
+                                logger.info("Deep analysis sent successfully using approved template")
+                                return True
+                            else:
+                                logger.warning("Template send failed, falling back to freeform")
+                        else:
+                            logger.info("Template not approved yet, using freeform mode")
+                    else:
+                        logger.warning("Template config not found, using freeform mode")
+                        
+                except Exception as e:
+                    logger.warning(f"Template mode failed: {e}, falling back to freeform")
+            
+            # Fallback to freeform message (original implementation)
             # Extract analysis data
             trend = analysis.get('trend', 'NEUTRAL')
             action = analysis.get('recommended_action', 'HOLD')

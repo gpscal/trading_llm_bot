@@ -42,18 +42,51 @@ CONFIG = {
     'cooldown_period': 300,  # 5 minutes between trades (was 1 second - too short!)
     'api_key': os.getenv('API_KEY'),
     'api_secret': os.getenv('API_SECRET'),
+    'api_passphrase': os.getenv('API_PASSPHRASE'),  # For OKX
+    
+    # Exchange Configuration (Kraken)
+    'exchange': 'kraken',  # Current exchange: 'kraken', 'okx', 'coinbase', or 'bybit'
+    
+    # Kraken URLs
     'base_url': 'https://api.kraken.com',
     'websocket_url': 'wss://ws.kraken.com/',
+    
+    # Other exchanges (not currently in use)
+    'okx_base_url': 'https://www.okx.com',
+    
+    # Coinbase (had API key issues)
+    'coinbase_base_url': 'https://api.coinbase.com',
+    
+    # Bybit (not available in Canada)
+    'bybit_base_url': 'https://api.bybit.com',
+    'bybit_testnet_url': 'https://api-testnet.bybit.com',
+    
     'coin_pairs': {
         'SOL': {
-            'rest': 'SOLUSDT',      # Kraken REST spot pair (USDT quote)
-            'rest_alt': 'SOLUSD',    # Kraken REST alternate pair (USD quote)
+            # Kraken format (current)
+            'rest': 'SOLUSDT',
+            'rest_alt': 'SOLUSD',
             'websocket': 'SOL/USD',
+            'symbol': 'SOL',
+            # OKX format
+            'okx_rest': 'SOL-USDT',
+            # Coinbase format
+            'coinbase_rest': 'SOL-USD',
+            # Bybit format
+            'bybit_rest': 'SOLUSDT',
         },
         'BTC': {
+            # Kraken format (current)
             'rest': 'XXBTZUSD',
             'rest_alt': 'XBTUSDT',
             'websocket': 'XBT/USD',
+            'symbol': 'XBT',
+            # OKX format
+            'okx_rest': 'BTC-USDT',
+            # Coinbase format
+            'coinbase_rest': 'BTC-USD',
+            # Bybit format
+            'bybit_rest': 'BTCUSDT',
         },
     },
     # Alerts/notifications
@@ -132,9 +165,11 @@ CONFIG = {
     'deep_analysis_veto_power': True,  # Deep analysis can veto trades if high confidence
     'deep_analysis_min_agreement': 0.6,  # Minimum agreement between fast/deep for high confidence
     
-    # News API settings (NewsAPI.ai integration for sentiment analysis)
+    # News API settings (CryptoCompare primary, NewsAPI.ai fallback)
     'news_api_enabled': True,  # Enable news fetching and sentiment analysis
-    'news_api_key': os.getenv('NEWS_API_AI'),  # NewsAPI.ai API key
+    'cryptocompare_api_key': os.getenv('CRYPTOCOMPARE_API_KEY'),  # CryptoCompare API key (primary)
+    'cryptocompare_base_url': 'https://min-api.cryptocompare.com/data',  # CryptoCompare base URL
+    'news_api_key': os.getenv('NEWS_API_AI'),  # NewsAPI.ai API key (fallback)
     'news_api_base_url': 'https://eventregistry.org/api/v1',  # NewsAPI.ai base URL
     'news_api_cache_duration': 3600,  # Cache news for 1 hour (news changes less frequently)
     'news_api_rate_limit': 100,  # Max requests per day (adjust based on your plan)

@@ -218,6 +218,29 @@ class DeepAnalyzer:
             except Exception as e:
                 logger.warning(f"Failed to send WhatsApp notification: {e}")
             
+            # Send Discord notification with analysis report
+            try:
+                from utils.discord_notifier import get_discord_notifier
+                discord_notifier = await get_discord_notifier()
+                
+                if discord_notifier.enabled:
+                    # Extract coin from symbol (e.g., "BTC/USD" -> "BTC")
+                    coin = symbol.split('/')[0] if '/' in symbol else symbol
+                    
+                    # Send report
+                    sent = await discord_notifier.send_deep_analysis_report(
+                        coin=coin,
+                        price=current_price,
+                        analysis=result.to_dict()
+                    )
+                    
+                    if sent:
+                        logger.info(f"💬 Deep analysis report sent to Discord for {symbol}")
+                    else:
+                        logger.debug("Discord notification not sent (may be disabled)")
+            except Exception as e:
+                logger.warning(f"Failed to send Discord notification: {e}")
+            
             return result
             
         except Exception as e:
@@ -303,7 +326,7 @@ class DeepAnalyzer:
     
     async def _fetch_crypto_news(self, symbol: str) -> Optional[Dict[str, Any]]:
         """
-        Fetch cryptocurrency news from NewsAPI.ai and analyze sentiment
+        Fetch cryptocurrency news from CryptoCompare (primary) or NewsAPI.ai (fallback)
         
         Args:
             symbol: Trading pair (e.g., 'BTC/USD', 'SOL/USD')
@@ -314,11 +337,6 @@ class DeepAnalyzer:
         # Check if news API is enabled and configured
         if not self.config.get('news_api_enabled', False):
             logger.debug("News API not enabled")
-            return None
-        
-        news_api_key = self.config.get('news_api_key')
-        if not news_api_key:
-            logger.warning("News API key not configured (NEWS_API_AI)")
             return None
         
         # Check cache first
@@ -332,9 +350,141 @@ class DeepAnalyzer:
                 logger.debug(f"Using cached news data for {symbol}")
                 return cached_data.get('data')
         
+        # Extract coin name from symbol (e.g., 'BTC/USD' -> 'BTC')
+        coin = symbol.split('/')[0].upper()
+        
+        # Try CryptoCompare first (primary source)
+        cryptocompare_result = await self._fetch_cryptocompare_news(coin)
+        if cryptocompare_result:
+            # Cache the result
+            self._cache[cache_key] = {
+                'timestamp': current_time,
+                'data': cryptocompare_result
+            }
+            logger.info(f"Fetched news from CryptoCompare for {symbol}: "
+                       f"{cryptocompare_result['sentiment_label']} sentiment "
+                       f"(score: {cryptocompare_result['sentiment_score']:.2f})")
+            return cryptocompare_result
+        
+        # Fallback to NewsAPI.ai if CryptoCompare fails
+        logger.info(f"CryptoCompare unavailable, falling back to NewsAPI.ai for {symbol}")
+        newsapi_result = await self._fetch_newsapi_news(coin, symbol)
+        if newsapi_result:
+            # Cache the result
+            self._cache[cache_key] = {
+                'timestamp': current_time,
+                'data': newsapi_result
+            }
+            logger.info(f"Fetched news from NewsAPI.ai for {symbol}: "
+                       f"{newsapi_result['sentiment_label']} sentiment "
+                       f"(score: {newsapi_result['sentiment_score']:.2f})")
+            return newsapi_result
+        
+        logger.warning(f"All news sources failed for {symbol}")
+        return None
+    
+    async def _fetch_cryptocompare_news(self, coin: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch cryptocurrency news from CryptoCompare API
+        
+        Args:
+            coin: Coin symbol (e.g., 'BTC', 'SOL')
+        
+        Returns:
+            Dictionary containing news summary, sentiment, and article count
+        """
+        cryptocompare_api_key = self.config.get('cryptocompare_api_key')
+        if not cryptocompare_api_key:
+            logger.debug("CryptoCompare API key not configured (CRYPTOCOMPARE_API_KEY)")
+            return None
+        
         try:
-            # Extract coin name from symbol (e.g., 'BTC/USD' -> 'bitcoin')
-            coin = symbol.split('/')[0].upper()
+            base_url = self.config.get('cryptocompare_base_url', 'https://min-api.cryptocompare.com/data')
+            timeout = self.config.get('news_api_timeout', 15)
+            
+            # CryptoCompare news API endpoint
+            url = f"{base_url}/v2/news/"
+            params = {
+                'categories': coin,
+                'lang': 'EN'
+            }
+            
+            # Add API key to headers
+            headers = {
+                'authorization': f'Apikey {cryptocompare_api_key}'
+            }
+            
+            session = await self._get_session()
+            
+            logger.debug(f"Fetching CryptoCompare news for {coin}")
+            
+            async with session.get(url, params=params, headers=headers, timeout=timeout) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.warning(f"CryptoCompare API returned status {response.status}: {error_text[:200]}")
+                    return None
+                
+                data = await response.json()
+                
+                # Parse CryptoCompare response
+                if 'Data' not in data or not data['Data']:
+                    logger.debug(f"No articles found in CryptoCompare response for {coin}")
+                    return None
+                
+                articles = data['Data']
+                
+                # Limit to max articles
+                max_articles = self.config.get('news_api_max_articles', 10)
+                articles = articles[:max_articles]
+                
+                # Analyze sentiment from articles
+                sentiment_analysis = self._analyze_news_sentiment(articles, coin, source='cryptocompare')
+                
+                # Build result
+                result = {
+                    'article_count': len(articles),
+                    'sentiment_score': sentiment_analysis['sentiment_score'],
+                    'sentiment_label': sentiment_analysis['sentiment_label'],
+                    'summary': sentiment_analysis['summary'],
+                    'top_headlines': [
+                        {
+                            'title': article.get('title', ''),
+                            'source': article.get('source', 'Unknown'),
+                            'url': article.get('url', ''),
+                            'date': article.get('published_on', '')
+                        }
+                        for article in articles[:5]
+                    ],
+                    'timestamp': time.time(),
+                    'news_source': 'CryptoCompare'
+                }
+                
+                return result
+                
+        except asyncio.TimeoutError:
+            logger.warning(f"CryptoCompare API request timed out for {coin}")
+        except Exception as e:
+            logger.warning(f"Error fetching CryptoCompare news for {coin}: {e}", exc_info=True)
+        
+        return None
+    
+    async def _fetch_newsapi_news(self, coin: str, symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch cryptocurrency news from NewsAPI.ai (fallback)
+        
+        Args:
+            coin: Coin symbol (e.g., 'BTC', 'SOL')
+            symbol: Trading pair (e.g., 'BTC/USD', 'SOL/USD')
+        
+        Returns:
+            Dictionary containing news summary, sentiment, and article count
+        """
+        news_api_key = self.config.get('news_api_key')
+        if not news_api_key:
+            logger.debug("NewsAPI.ai key not configured (NEWS_API_AI)")
+            return None
+        
+        try:
             coin_keywords = {
                 'BTC': 'bitcoin',
                 'ETH': 'ethereum', 
@@ -347,11 +497,6 @@ class DeepAnalyzer:
             
             # Get primary keyword for this coin, fallback to generic crypto
             primary_keyword = coin_keywords.get(coin, 'cryptocurrency')
-            
-            # Build query with additional crypto keywords
-            keywords = self.config.get('news_crypto_keywords', ['crypto', 'cryptocurrency'])
-            if primary_keyword not in keywords:
-                keywords = [primary_keyword] + keywords[:2]  # Add primary + top 2 general terms
             
             # NewsAPI.ai query parameters
             base_url = self.config.get('news_api_base_url', 'https://eventregistry.org/api/v1')
@@ -369,25 +514,25 @@ class DeepAnalyzer:
                 'articlesPage': 1,
                 'articlesCount': max_articles,
                 'articlesSortBy': 'date',
-                'articlesSortByAsc': 'false',  # Must be string, not boolean
+                'articlesSortByAsc': 'false',
                 'lang': 'eng',
                 'isDuplicateFilter': 'skipDuplicates',
                 'resultType': 'articles'
             }
             
-            logger.debug(f"Fetching news for {symbol} (keyword: {primary_keyword})")
+            logger.debug(f"Fetching NewsAPI.ai news for {symbol} (keyword: {primary_keyword})")
             
             async with session.get(url, params=params, timeout=timeout) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.warning(f"News API returned status {response.status}: {error_text[:200]}")
+                    logger.warning(f"NewsAPI.ai returned status {response.status}: {error_text[:200]}")
                     return None
                 
                 data = await response.json()
                 
                 # Parse NewsAPI.ai response
                 if 'articles' not in data or 'results' not in data['articles']:
-                    logger.debug(f"No articles found in News API response for {symbol}")
+                    logger.debug(f"No articles found in NewsAPI.ai response for {symbol}")
                     return None
                 
                 articles = data['articles']['results']
@@ -397,13 +542,13 @@ class DeepAnalyzer:
                     return None
                 
                 # Analyze sentiment from articles
-                sentiment_analysis = self._analyze_news_sentiment(articles, coin)
+                sentiment_analysis = self._analyze_news_sentiment(articles, coin, source='newsapi')
                 
                 # Build result
                 result = {
                     'article_count': len(articles),
-                    'sentiment_score': sentiment_analysis['sentiment_score'],  # -1.0 to 1.0
-                    'sentiment_label': sentiment_analysis['sentiment_label'],  # BULLISH/BEARISH/NEUTRAL
+                    'sentiment_score': sentiment_analysis['sentiment_score'],
+                    'sentiment_label': sentiment_analysis['sentiment_label'],
                     'summary': sentiment_analysis['summary'],
                     'top_headlines': [
                         {
@@ -412,37 +557,29 @@ class DeepAnalyzer:
                             'url': article.get('url', ''),
                             'date': article.get('dateTime', '')
                         }
-                        for article in articles[:5]  # Top 5 headlines
+                        for article in articles[:5]
                     ],
-                    'timestamp': current_time
+                    'timestamp': time.time(),
+                    'news_source': 'NewsAPI.ai'
                 }
-                
-                # Cache the result
-                self._cache[cache_key] = {
-                    'timestamp': current_time,
-                    'data': result
-                }
-                
-                logger.info(f"Fetched {len(articles)} news articles for {symbol}: "
-                          f"{sentiment_analysis['sentiment_label']} sentiment "
-                          f"(score: {sentiment_analysis['sentiment_score']:.2f})")
                 
                 return result
                 
         except asyncio.TimeoutError:
-            logger.warning(f"News API request timed out for {symbol}")
+            logger.warning(f"NewsAPI.ai request timed out for {symbol}")
         except Exception as e:
-            logger.warning(f"Error fetching crypto news for {symbol}: {e}", exc_info=True)
+            logger.warning(f"Error fetching NewsAPI.ai news for {symbol}: {e}", exc_info=True)
         
         return None
     
-    def _analyze_news_sentiment(self, articles: List[Dict], coin: str) -> Dict[str, Any]:
+    def _analyze_news_sentiment(self, articles: List[Dict], coin: str, source: str = 'newsapi') -> Dict[str, Any]:
         """
         Analyze sentiment from news articles
         
         Args:
-            articles: List of article data from NewsAPI.ai
+            articles: List of article data from CryptoCompare or NewsAPI.ai
             coin: Coin symbol (e.g., 'BTC', 'SOL')
+            source: Data source ('cryptocompare' or 'newsapi')
         
         Returns:
             Dictionary with sentiment score, label, and summary
@@ -471,8 +608,14 @@ class DeepAnalyzer:
         headlines = []
         
         for article in articles:
-            title = article.get('title', '').lower()
-            body = article.get('body', '').lower()[:500]  # First 500 chars of body
+            # Handle different article formats from different sources
+            if source == 'cryptocompare':
+                title = article.get('title', '').lower()
+                body = article.get('body', '').lower()[:500]  # First 500 chars of body
+            else:  # newsapi
+                title = article.get('title', '').lower()
+                body = article.get('body', '').lower()[:500]  # First 500 chars of body
+            
             text = f"{title} {body}"
             
             # Count sentiment keywords

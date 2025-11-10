@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2025-11-07",
+  "last_updated": "2025-11-10",
   "templates": {
     "signal_change_alert": {
       "name": "signal_change_alert",
@@ -20,11 +20,11 @@
     },
     "deep_market_analysis": {
       "name": "deep_market_analysis",
-      "content_sid": "",
-      "status": "pending_approval",
+      "content_sid": "HXa150023aee81063cc8dc9cb944507283",
+      "status": "approved",
       "description": "Comprehensive AI market analysis",
-      "variables_count": 26,
-      "notes": "Most detailed template - sent every 2 hours"
+      "variables_count": 31,
+      "notes": "Most detailed template - sent every 2 hours. Approved on 2025-11-10"
     },
     "bot_status": {
       "name": "bot_status",
@@ -53,8 +53,8 @@
   },
   "approval_status": {
     "total_templates": 6,
-    "approved": 0,
-    "pending": 6,
+    "approved": 1,
+    "pending": 5,
     "rejected": 0
   },
   "instructions": [

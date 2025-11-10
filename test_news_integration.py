@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Test News API Integration
-Tests the NewsAPI.ai integration in DeepAnalyzer
+Tests the CryptoCompare (primary) and NewsAPI.ai (fallback) integration in DeepAnalyzer
 """
 import os
 import sys
@@ -26,6 +26,8 @@ async def test_news_api_configuration():
     
     required_keys = [
         'news_api_enabled',
+        'cryptocompare_api_key',
+        'cryptocompare_base_url',
         'news_api_key',
         'news_api_base_url',
         'news_api_cache_duration',
@@ -39,20 +41,36 @@ async def test_news_api_configuration():
         if key not in CONFIG:
             missing_keys.append(key)
         else:
-            print(f"✓ {key}: {CONFIG[key]}")
+            # Mask API keys for security
+            if 'api_key' in key and CONFIG[key]:
+                print(f"✓ {key}: {CONFIG[key][:10]}...")
+            else:
+                print(f"✓ {key}: {CONFIG[key]}")
     
     if missing_keys:
         print(f"\n✗ Missing configuration keys: {missing_keys}")
         return False
     
-    # Check API key
-    if not CONFIG.get('news_api_key'):
-        print("\n⚠ WARNING: NEWS_API_AI environment variable not set!")
-        print("  Please add NEWS_API_AI=your_api_key to your .env file")
+    # Check CryptoCompare API key (primary)
+    if CONFIG.get('cryptocompare_api_key'):
+        print(f"\n✓ CryptoCompare API Key configured (primary source)")
+    else:
+        print("\n⚠ WARNING: CRYPTOCOMPARE_API_KEY not set!")
+        print("  CryptoCompare will not be available, falling back to NewsAPI.ai")
+    
+    # Check NewsAPI.ai key (fallback)
+    if CONFIG.get('news_api_key'):
+        print(f"✓ NewsAPI.ai Key configured (fallback source)")
+    else:
+        print("⚠ WARNING: NEWS_API_AI not set!")
+        print("  NewsAPI.ai fallback will not be available")
+    
+    if not CONFIG.get('cryptocompare_api_key') and not CONFIG.get('news_api_key'):
+        print("\n✗ ERROR: No news API keys configured!")
+        print("  Please add CRYPTOCOMPARE_API_KEY and/or NEWS_API_AI to your .env file")
         return False
     
-    print(f"\n✓ API Key configured: {CONFIG['news_api_key'][:10]}...")
-    print("✓ All configuration keys present")
+    print("\n✓ News API configuration valid")
     return True
 
 
@@ -76,6 +94,7 @@ async def test_fetch_crypto_news():
                 print(f"⚠ No news data returned for {symbol}")
                 continue
             
+            print(f"✓ News Source: {news_data.get('news_source', 'Unknown')}")
             print(f"✓ Article Count: {news_data.get('article_count', 0)}")
             print(f"✓ Sentiment Label: {news_data.get('sentiment_label', 'N/A')}")
             print(f"✓ Sentiment Score: {news_data.get('sentiment_score', 0):.3f}")
@@ -282,19 +301,20 @@ async def test_error_handling():
     print("TEST 6: Error Handling")
     print("="*80)
     
-    # Test with invalid API key
-    print("\n--- Testing with invalid API key ---")
+    # Test with invalid API keys
+    print("\n--- Testing with invalid API keys ---")
     bad_config = CONFIG.copy()
-    bad_config['news_api_key'] = 'invalid_key_12345'
+    bad_config['cryptocompare_api_key'] = 'invalid_key_12345'
+    bad_config['news_api_key'] = 'invalid_key_67890'
     
     analyzer = DeepAnalyzer(bad_config)
     
     try:
         news = await analyzer._fetch_crypto_news('BTC/USD')
         if news is None:
-            print("✓ Invalid API key handled gracefully (returned None)")
+            print("✓ Invalid API keys handled gracefully (returned None)")
         else:
-            print("⚠ Expected None for invalid API key, got data instead")
+            print("⚠ Expected None for invalid API keys, got data instead")
     except Exception as e:
         print(f"⚠ Exception raised instead of returning None: {e}")
     

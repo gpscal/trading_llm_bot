@@ -35,18 +35,29 @@ async def get_balance():
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, data=urlencode(data)) as response:
-                response_text = await response.text()
-                logger.info(f"Response text: {response_text}")
-                response.raise_for_status()
-                data = await response.json()
-                if 'result' in data:
-                    return data['result']
+            async with session.post(url, headers=headers, data=data) as response:
+                # Read response once as JSON
+                response_json = await response.json()
+                logger.info(f"Response: {response_json}")
+                
+                # Check for errors in Kraken response
+                if 'error' in response_json and response_json['error']:
+                    error_list = response_json['error']
+                    logger.error(f"Kraken API error: {error_list}")
+                    return {'error': error_list}
+                
+                # Return result if successful
+                if 'result' in response_json:
+                    logger.info(f"✅ Balance fetched successfully")
+                    return response_json['result']
                 else:
-                    logger.error(f"Unexpected response structure: {data}")
-                    return {'error': data.get('error', ['Unknown error'])}
+                    logger.error(f"Unexpected response structure: {response_json}")
+                    return {'error': ['Unexpected response format']}
+                    
     except Exception as e:
-        logger.error(f"Error fetching balance: {str(e)}")
+        logger.error(f"Exception fetching balance: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return {'error': [str(e)]}
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))

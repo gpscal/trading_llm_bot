@@ -28,3 +28,6 @@ openai>=1.61.0
 
 # WhatsApp notifications via Twilio
 twilio>=9.0.0
+discord.py>=2.6.0
+pyjwt>=2.8.0
+cryptography>=41.0.0

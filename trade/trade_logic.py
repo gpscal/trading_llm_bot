@@ -10,6 +10,7 @@ from utils.shared_state import append_log_safe
 # Import notifiers and signal tracker
 from utils.telegram_notifier import get_telegram_notifier
 from utils.whatsapp_notifier import get_whatsapp_notifier
+from utils.discord_notifier import get_discord_notifier
 from utils.signal_tracker import get_signal_tracker
 
 logger = setup_logger('trade_logic_logger', 'trade_logic.log')
@@ -477,6 +478,22 @@ async def handle_trade_with_fees(
                         )
                     except Exception as e:
                         logger.warning(f"Failed to send WhatsApp signal change notification: {e}")
+                    
+                    # Discord notification (async)
+                    try:
+                        import asyncio
+                        discord_notifier = await get_discord_notifier()
+                        await discord_notifier.send_signal_change_alert(
+                            coin=trade_coin,
+                            old_signal=old_signal,
+                            new_signal=llm_signal_str,
+                            price=primary_price,
+                            confidence=confidence,
+                            llm_signal=llm_signal
+                        )
+                        logger.info(f"Discord signal change alert sent for {trade_coin}")
+                    except Exception as e:
+                        logger.warning(f"Failed to send Discord signal change notification: {e}")
                 
                 if llm_signal_str == 'HOLD':
                     msg = f"{get_timestamp()} LLM Advisor says HOLD - vetoing trade (Confidence was: {confidence:.2f})"
@@ -676,6 +693,23 @@ async def handle_trade_with_fees(
             )
         except Exception as e:
             logger.warning(f"Failed to send WhatsApp trade notification: {e}")
+        
+        # Discord notification for trade execution (async)
+        try:
+            import asyncio
+            discord_notifier = await get_discord_notifier()
+            await discord_notifier.send_trade_execution_alert(
+                coin=trade_coin,
+                action=trade_action.upper(),
+                amount=volume,
+                price=primary_price,
+                total_value=volume * primary_price,
+                balance_usdt=balance_usdt,
+                balance_coin=balance_coin_amount
+            )
+            logger.info(f"Discord trade execution alert sent for {trade_coin}")
+        except Exception as e:
+            logger.warning(f"Failed to send Discord trade notification: {e}")
 
         # Update total portfolio metrics
         current_total_usd = balance_usdt
