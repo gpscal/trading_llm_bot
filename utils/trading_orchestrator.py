@@ -101,9 +101,10 @@ async def run_trading_loop(
             
             # Execute trade logic
             coin_balance = balance.get('coins', {}).get(trade_coin, {}).get('amount', 0.0)
+            old_last_trade_time = balance.get('last_trade_time', 0)
             balance['usdt'], new_coin_balance, balance['last_trade_time'] = await handle_trade_with_fees(
                 btc_price, sol_price,
-                balance['usdt'], coin_balance, balance.get('last_trade_time', 0),
+                balance['usdt'], coin_balance, old_last_trade_time,
                 btc_indicators, sol_indicators,
                 initial_coin_price, initial_total_usd,
                 balance,
@@ -131,8 +132,20 @@ async def run_trading_loop(
             peak = balance['peak_total_usd']
             drawdown_pct = 0.0 if peak == 0 else max(0.0, (peak - current_total_usd) / peak * 100.0)
             
-            # Log status
-            log_and_print_status(balance, current_total_usd, total_gain_usd, coin=trade_coin)
+            # Only log status if:
+            # 1. Trade time changed (trade was attempted/executed), OR
+            # 2. We're not in cooldown (to show periodic status), OR  
+            # 3. It's been more than 5 minutes since last status log
+            now = time.time()
+            should_log_status = (
+                balance['last_trade_time'] != old_last_trade_time or  # Trade attempted
+                (now - old_last_trade_time) >= CONFIG['cooldown_period'] or  # Not in cooldown
+                (now - balance.get('last_status_log', 0)) >= 300  # 5 min since last status
+            )
+            
+            if should_log_status:
+                log_and_print_status(balance, current_total_usd, total_gain_usd, coin=trade_coin)
+                balance['last_status_log'] = now
             
             # Update shared state - ensure running flag is set
             update_data = {

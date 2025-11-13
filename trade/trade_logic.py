@@ -47,6 +47,13 @@ async def handle_trade_with_fees(
     balance_coin_amount = balance_sol
     try:
         now = time.time()
+        
+        # EARLY EXIT: Check cooldown first before doing ANY expensive operations
+        if now - last_trade_time < CONFIG['cooldown_period']:
+            # Silently skip during cooldown (with 1-min poll, we only check once per minute anyway)
+            time_remaining = CONFIG['cooldown_period'] - (now - last_trade_time)
+            logger.debug(f"{get_timestamp()} Cooldown active ({time_remaining:.0f}s remaining)")
+            return balance_usdt, balance_coin_amount, last_trade_time
 
         trade_coin = (selected_coin or (balance or {}).get('selected_coin') or CONFIG.get('default_coin', 'SOL')).upper()
         if trade_coin not in ('SOL', 'BTC'):
@@ -86,10 +93,6 @@ async def handle_trade_with_fees(
 
         if btc_current_price <= 0 or sol_current_price <= 0:
             logger.warning(f"{get_timestamp()} Invalid price data (BTC={btc_current_price}, SOL={sol_current_price}). Skipping trade.")
-            return balance_usdt, balance_coin_amount, last_trade_time
-
-        if now - last_trade_time < CONFIG['cooldown_period']:
-            logger.info(f"{get_timestamp()} Cooldown period active. Skipping trade.")
             return balance_usdt, balance_coin_amount, last_trade_time
 
         # --- Portfolio-level risk: max drawdown ---
@@ -294,6 +297,7 @@ async def handle_trade_with_fees(
                     if llm_signal:
                         llm_signal_str = llm_signal.get('signal', 'HOLD')
                         llm_confidence = llm_signal.get('confidence_score', 0.5)
+                        is_cached_signal = llm_signal.get('is_cached', False)
                         
                         # Determine if LLM agrees with indicators
                         indicator_direction = 'up' if primary_momentum > 0 else 'down'
@@ -309,8 +313,12 @@ async def handle_trade_with_fees(
                             # LLM contradicts indicators - negative boost
                             llm_boost = -llm_confidence * CONFIG.get('llm_confidence_weight', 0.2)
                         
-                        logger.info(f"LLM Signal: {llm_signal_str}, Confidence: {llm_confidence:.2f}, Boost: {llm_boost:.2f}")
-                        append_log_safe(f"LLM: {llm_signal_str} (confidence: {llm_confidence:.2f}, boost: {llm_boost:+.2f})")
+                        # Only log detailed info for fresh signals, not cached ones
+                        if not is_cached_signal:
+                            logger.info(f"LLM Signal: {llm_signal_str}, Confidence: {llm_confidence:.2f}, Boost: {llm_boost:.2f}")
+                            append_log_safe(f"LLM: {llm_signal_str} (confidence: {llm_confidence:.2f}, boost: {llm_boost:+.2f})")
+                        else:
+                            logger.debug(f"LLM Signal (cached): {llm_signal_str}, Confidence: {llm_confidence:.2f}, Boost: {llm_boost:.2f}")
                 except Exception as e:
                     logger.warning(f"LLM signal skipped due to exception: {e}", exc_info=True)
                     
@@ -441,59 +449,98 @@ async def handle_trade_with_fees(
                 return balance_usdt, balance_coin_amount, last_trade_time
 
         if CONFIG.get('llm_enabled', False) and CONFIG.get('llm_final_authority', True):
+            # Check if consensus mode is enabled (requires BOTH Fast LLM and Deep Analysis to agree)
+            consensus_required = CONFIG.get('llm_consensus_required', False)
+            
             if llm_signal:
                 llm_signal_str = llm_signal.get('signal', 'HOLD')
                 
-                # Check for signal change and send notifications
+                # Check if this is a fresh signal or cached
+                is_cached = llm_signal.get('is_cached', False)
+                
+                # Only update signal tracking and check stability for FRESH signals
                 signal_tracker = get_signal_tracker()
                 telegram = get_telegram_notifier()
                 whatsapp = get_whatsapp_notifier()
-                signal_changed, old_signal = signal_tracker.check_signal_change(trade_coin, llm_signal_str)
                 
-                if signal_changed and old_signal:
-                    logger.info(f"Signal changed for {trade_coin}: {old_signal} ? {llm_signal_str}")
-                    # Send notifications with LLM feedback and Deep Analysis
-                    try:
-                        telegram.send_signal_change_alert(
-                            coin=trade_coin,
-                            old_signal=old_signal,
-                            new_signal=llm_signal_str,
-                            price=primary_price,
-                            confidence=confidence,
-                            llm_signal=llm_signal,
-                            deep_analysis=deep_analysis if deep_analysis else None
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to send Telegram signal change notification: {e}")
+                if not is_cached:
+                    # Fresh signal - update tracking and check stability
+                    logger.debug(f"Fresh LLM signal received for {trade_coin}: {llm_signal_str}")
+                    signal_changed, old_signal = signal_tracker.check_signal_change(trade_coin, llm_signal_str)
                     
-                    try:
-                        whatsapp.send_signal_change_alert(
-                            coin=trade_coin,
-                            old_signal=old_signal,
-                            new_signal=llm_signal_str,
-                            price=primary_price,
-                            confidence=confidence,
-                            llm_signal=llm_signal,
-                            deep_analysis=deep_analysis if deep_analysis else None
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to send WhatsApp signal change notification: {e}")
+                    # Check signal stability if required
+                    if CONFIG.get('llm_signal_stability_required', False):
+                        stability_count = CONFIG.get('llm_signal_stability_count', 2)
+                        is_stable, stable_signal = signal_tracker.check_signal_stability(trade_coin, stability_count)
+                        
+                        if not is_stable:
+                            msg = (
+                                f"{get_timestamp()} Signal stability check failed for {trade_coin}. "
+                                f"Need {stability_count} consecutive {llm_signal_str} signals. "
+                                f"Skipping trade for safety."
+                            )
+                            logger.info(msg)
+                            append_log_safe(f"⏳ STABILITY CHECK: Need {stability_count} consecutive signals for {trade_coin}")
+                            
+                            # Show recent signal history
+                            recent_signals = signal_tracker.get_signal_history(trade_coin, count=stability_count)
+                            if recent_signals:
+                                signals_str = " → ".join([sig for sig, _ in recent_signals])
+                                append_log_safe(f"   Recent signals: {signals_str}")
+                            
+                            return balance_usdt, balance_coin_amount, last_trade_time
+                        else:
+                            logger.info(f"✓ Signal stability confirmed for {trade_coin}: {stability_count} consecutive {stable_signal} signals")
+                            append_log_safe(f"✓ STABILITY CHECK PASSED: {stability_count}x {stable_signal} for {trade_coin}")
                     
-                    # Discord notification (async)
-                    try:
-                        import asyncio
-                        discord_notifier = await get_discord_notifier()
-                        await discord_notifier.send_signal_change_alert(
-                            coin=trade_coin,
-                            old_signal=old_signal,
-                            new_signal=llm_signal_str,
-                            price=primary_price,
-                            confidence=confidence,
-                            llm_signal=llm_signal
-                        )
-                        logger.info(f"Discord signal change alert sent for {trade_coin}")
-                    except Exception as e:
-                        logger.warning(f"Failed to send Discord signal change notification: {e}")
+                    # Send signal change notifications if signal changed
+                    if signal_changed and old_signal:
+                        logger.info(f"Signal changed for {trade_coin}: {old_signal} → {llm_signal_str}")
+                        # Send notifications with LLM feedback and Deep Analysis
+                        try:
+                            telegram.send_signal_change_alert(
+                                coin=trade_coin,
+                                old_signal=old_signal,
+                                new_signal=llm_signal_str,
+                                price=primary_price,
+                                confidence=confidence,
+                                llm_signal=llm_signal,
+                                deep_analysis=deep_analysis if deep_analysis else None
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send Telegram signal change notification: {e}")
+                        
+                        try:
+                            whatsapp.send_signal_change_alert(
+                                coin=trade_coin,
+                                old_signal=old_signal,
+                                new_signal=llm_signal_str,
+                                price=primary_price,
+                                confidence=confidence,
+                                llm_signal=llm_signal,
+                                deep_analysis=deep_analysis if deep_analysis else None
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to send WhatsApp signal change notification: {e}")
+                        
+                        # Discord notification (async)
+                        try:
+                            import asyncio
+                            discord_notifier = await get_discord_notifier()
+                            await discord_notifier.send_signal_change_alert(
+                                coin=trade_coin,
+                                old_signal=old_signal,
+                                new_signal=llm_signal_str,
+                                price=primary_price,
+                                confidence=confidence,
+                                llm_signal=llm_signal
+                            )
+                            logger.info(f"Discord signal change alert sent for {trade_coin}")
+                        except Exception as e:
+                            logger.warning(f"Failed to send Discord signal change notification: {e}")
+                else:
+                    # Cached signal - just log, no stability check
+                    logger.debug(f"Using cached LLM signal for {trade_coin}: {llm_signal_str}")
                 
                 if llm_signal_str == 'HOLD':
                     msg = f"{get_timestamp()} LLM Advisor says HOLD - vetoing trade (Confidence was: {confidence:.2f})"
@@ -512,16 +559,74 @@ async def handle_trade_with_fees(
                     append_log_safe(f"?? LLM VETO: {llm_signal_str} contradicts indicators for {trade_coin}")
                     return balance_usdt, balance_coin_amount, last_trade_time
 
-                logger.info(f"{get_timestamp()} ? LLM Advisor APPROVES trade: {llm_signal_str} on {trade_coin}")
-                append_log_safe(f"? LLM APPROVED: {llm_signal_str} {trade_coin}")
+                # CONSENSUS MODE: Check if both Fast LLM and Deep Analysis agree
+                if consensus_required:
+                    if not deep_analysis:
+                        msg = f"{get_timestamp()} Consensus mode: Deep Analysis unavailable - skipping trade"
+                        logger.info(msg)
+                        append_log_safe(f"⚠️ CONSENSUS: Deep Analysis missing, skipping {trade_coin}")
+                        return balance_usdt, balance_coin_amount, last_trade_time
+                    
+                    deep_action = deep_analysis.recommended_action
+                    
+                    # Check if Fast LLM and Deep Analysis agree
+                    if llm_signal_str != deep_action:
+                        msg = (
+                            f"{get_timestamp()} Consensus mode: Fast LLM ({llm_signal_str}) and "
+                            f"Deep Analysis ({deep_action}) disagree - skipping trade"
+                        )
+                        logger.info(msg)
+                        append_log_safe(f"⚠️ CONSENSUS FAILED: Fast={llm_signal_str}, Deep={deep_action} for {trade_coin}")
+                        return balance_usdt, balance_coin_amount, last_trade_time
+                    
+                    # Both agree but both say HOLD
+                    if llm_signal_str == 'HOLD':
+                        msg = f"{get_timestamp()} Consensus mode: Both LLMs say HOLD - skipping trade"
+                        logger.info(msg)
+                        append_log_safe(f"✓ CONSENSUS: Both HOLD for {trade_coin}")
+                        return balance_usdt, balance_coin_amount, last_trade_time
+                    
+                    # Both agree on BUY or SELL!
+                    logger.info(
+                        f"{get_timestamp()} ✓ CONSENSUS ACHIEVED: Both Fast LLM and Deep Analysis agree on {llm_signal_str} "
+                        f"(Deep confidence: {deep_analysis.confidence:.2f})"
+                    )
+                    append_log_safe(
+                        f"✓ CONSENSUS: Both {llm_signal_str} for {trade_coin} "
+                        f"(Deep: {deep_analysis.confidence:.0%} confidence)"
+                    )
+                else:
+                    # Non-consensus mode: Fast LLM approval is sufficient
+                    logger.info(f"{get_timestamp()} ✅ LLM Advisor APPROVES trade: {llm_signal_str} on {trade_coin}")
+                    append_log_safe(f"✅ LLM APPROVED: {llm_signal_str} {trade_coin}")
             else:
-                msg = f"{get_timestamp()} LLM enabled but no signal available - skipping trade for safety"
-                logger.info(msg)
-                append_log_safe(f"?? LLM: No signal, skipping trade for {trade_coin}")
-                return balance_usdt, balance_coin_amount, last_trade_time
+                # Fast LLM not available - check if deep analysis can make decision
+                if not CONFIG.get('deep_analysis_enabled', False):
+                    # No LLM signal and no deep analysis - skip trade
+                    msg = f"{get_timestamp()} LLM enabled but no signal available - skipping trade for safety"
+                    logger.info(msg)
+                    append_log_safe(f"?? LLM: No signal, skipping trade for {trade_coin}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+                elif consensus_required:
+                    # Consensus mode: BOTH required, Fast missing means no trade
+                    msg = f"{get_timestamp()} Consensus mode: Fast LLM unavailable - skipping trade"
+                    logger.info(msg)
+                    append_log_safe(f"⚠️ CONSENSUS: Fast LLM missing, skipping {trade_coin}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+                elif not deep_analysis:
+                    # Deep analysis enabled but also unavailable (throttled) - skip trade
+                    msg = f"{get_timestamp()} Both Fast LLM and Deep Analysis unavailable - skipping trade for safety"
+                    logger.info(msg)
+                    append_log_safe(f"⚠️ Both LLMs throttled, skipping trade for {trade_coin}")
+                    return balance_usdt, balance_coin_amount, last_trade_time
+                else:
+                    # Non-consensus mode: Deep analysis can make decision alone
+                    logger.info(f"{get_timestamp()} Fast LLM unavailable (throttled), using Deep Analysis...")
+                    append_log_safe(f"⚠️ Fast LLM throttled, using Deep Analysis for {trade_coin}")
         
         # Deep Analysis veto power (if enabled and high confidence)
-        if CONFIG.get('deep_analysis_enabled', False) and CONFIG.get('deep_analysis_veto_power', True):
+        # Note: In consensus mode, this section is mostly redundant since consensus was already checked above
+        if not consensus_required and CONFIG.get('deep_analysis_enabled', False) and CONFIG.get('deep_analysis_veto_power', True):
             if deep_analysis and deep_analysis.confidence >= 0.7:  # High confidence threshold
                 deep_action = deep_analysis.recommended_action
                 indicator_trade_direction = 'buy' if primary_momentum > 0 else 'sell'
@@ -533,9 +638,9 @@ async def handle_trade_with_fees(
                         f"({deep_analysis.confidence:.2f}) - vetoing trade"
                     )
                     logger.info(msg)
-                    append_log_safe(f"?? DEEP VETO: HOLD (confidence: {deep_analysis.confidence:.0%})")
+                    append_log_safe(f"⚠️ DEEP VETO: HOLD (confidence: {deep_analysis.confidence:.0%})")
                     if deep_analysis.warnings:
-                        append_log_safe(f"??  Reasons: {'; '.join(deep_analysis.warnings[:2])}")
+                        append_log_safe(f"⚠️  Reasons: {'; '.join(deep_analysis.warnings[:2])}")
                     return balance_usdt, balance_coin_amount, last_trade_time
                 
                 if indicator_trade_direction != deep_direction:
@@ -544,11 +649,11 @@ async def handle_trade_with_fees(
                         f"- vetoing trade. Deep: {deep_action}, Indicators: {indicator_trade_direction.upper()}"
                     )
                     logger.info(msg)
-                    append_log_safe(f"?? DEEP VETO: {deep_action} contradicts {indicator_trade_direction.upper()}")
+                    append_log_safe(f"⚠️ DEEP VETO: {deep_action} contradicts {indicator_trade_direction.upper()}")
                     return balance_usdt, balance_coin_amount, last_trade_time
                 
-                logger.info(f"{get_timestamp()} ? Deep Analysis APPROVES trade: {deep_action} (confidence: {deep_analysis.confidence:.2f})")
-                append_log_safe(f"? DEEP APPROVED: {deep_action} {trade_coin} ({deep_analysis.trend})")
+                logger.info(f"{get_timestamp()} ✅ Deep Analysis APPROVES trade: {deep_action} (confidence: {deep_analysis.confidence:.2f})")
+                append_log_safe(f"✅ DEEP APPROVED: {deep_action} {trade_coin} ({deep_analysis.trend})")
             elif deep_analysis:
                 logger.info(f"{get_timestamp()} Deep Analysis present but confidence too low for veto ({deep_analysis.confidence:.2f})")
 

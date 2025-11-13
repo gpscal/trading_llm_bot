@@ -36,4 +36,4 @@ async def print_status_periodically(balance):
         # Update shared state
         append_log_safe(status_message)
         
-        await asyncio.sleep(60)  # Adjust the interval to control the logging frequency
+        await asyncio.sleep(300)  # 5 minutes - aligns with poll_interval and Fast LLM min interval

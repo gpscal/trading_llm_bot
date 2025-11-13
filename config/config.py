@@ -38,8 +38,8 @@ CONFIG = {
         },
     },
     'reentry_min_usdt': 5,
-    'poll_interval': 5,
-    'cooldown_period': 300,  # 5 minutes between trades (was 1 second - too short!)
+    'poll_interval': 300,  # 5 minutes between trade checks (aligns with Fast LLM min interval)
+    'cooldown_period': 300,  # 5 minutes between trades
     'api_key': os.getenv('API_KEY'),
     'api_secret': os.getenv('API_SECRET'),
     'api_passphrase': os.getenv('API_PASSPHRASE'),  # For OKX
@@ -154,6 +154,9 @@ CONFIG = {
     'llm_final_authority': True,  # Give LLM final veto power - if HOLD, no trade happens
     'llm_confidence_weight': 0.25,  # How much LLM signal contributes to trade decision (0.0-1.0)
     'llm_model_config_path': 'LLM_trader/config/model_config.ini',  # Path to LLM model config
+    'llm_signal_stability_required': True,  # Require consecutive agreeing signals before trading
+    'llm_signal_stability_count': 2,  # Number of consecutive agreeing signals required (2-3 recommended)
+    'llm_consensus_required': True,  # Require BOTH Fast LLM and Deep Analysis to agree (BUY or SELL)
     
     # Deep Analysis settings (comprehensive analysis using Claude AI + RAG)
     'deep_analysis_enabled': True,  # Enable deep analyzer for comprehensive market context

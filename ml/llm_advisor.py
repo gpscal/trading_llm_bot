@@ -27,9 +27,9 @@ logger = setup_logger('llm_advisor_logger', 'llm_advisor.log')
 
 # Cache for LLM responses to avoid excessive API calls
 _llm_cache = {}
-_cache_duration = 300  # 5 minutes cache
+_cache_duration = 600  # 10 minutes cache (increased from 5 to prevent rapid signal changes)
 _last_call_time = 0
-_min_call_interval = 60  # Minimum 60 seconds between calls
+_min_call_interval = 300  # Minimum 5 minutes between calls (increased from 60s to align with cooldown)
 
 
 class LLMAdvisor:
@@ -198,7 +198,7 @@ class LLMAdvisor:
         current_time = time.time()
         
         # Create cache key based on time bucket only (not price-sensitive)
-        # This allows reusing the same response for 5 minutes regardless of small price changes
+        # This allows reusing the same response for the cache duration regardless of small price changes
         time_bucket = int(current_time / _cache_duration)
         cache_key = f"llm_signal_{time_bucket}"
         time_since_last_call = current_time - _last_call_time
@@ -208,12 +208,25 @@ class LLMAdvisor:
             cached_result = _llm_cache[cache_key]
             cache_age = current_time - cached_result['timestamp']
             if cache_age < _cache_duration:
-                logger.info(f"Using cached LLM response (age: {cache_age:.1f}s)")
-                return cached_result['result']
+                logger.debug(f"Using cached LLM response (age: {cache_age:.1f}s)")
+                # Mark result as cached so trade logic knows not to recheck stability
+                result = cached_result['result'].copy()
+                result['is_cached'] = True
+                return result
         
-        # Enforce minimum call interval
+        # Enforce minimum call interval - but still return cached signal if available
         if time_since_last_call < _min_call_interval:
-            logger.info(f"LLM call throttled (minimum {_min_call_interval}s interval, {time_since_last_call:.1f}s since last call)")
+            # Check if we have ANY recent cached result (not just current time bucket)
+            for key, cached_data in _llm_cache.items():
+                cache_age = current_time - cached_data['timestamp']
+                if cache_age < _cache_duration:
+                    logger.debug(f"LLM throttled, returning cached signal (age: {cache_age:.1f}s)")
+                    result = cached_data['result'].copy()
+                    result['is_cached'] = True
+                    return result
+            
+            # No cache available and throttled - return None
+            logger.info(f"LLM call throttled (minimum {_min_call_interval}s interval, {time_since_last_call:.1f}s since last call), no cache available")
             return None
         
         try:
@@ -253,7 +266,8 @@ class LLMAdvisor:
                 'reasoning': analysis[:500],  # First 500 chars of reasoning
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
-                'full_analysis': analysis
+                'full_analysis': analysis,
+                'is_cached': False  # Fresh signal from LLM
             }
             
             # Cache result
