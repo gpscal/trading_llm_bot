@@ -1,6 +1,7 @@
 [Unit]
 Description=Trading LLM Bot Simulation Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -19,8 +20,9 @@ ExecStart=%VENV_BIN%/gunicorn -c simulate_gunicorn.conf.py simulate_wsgi:applica
 ExecReload=/bin/kill -HUP $MAINPID
 
 # Restart policy - restart on failure to ensure simulation keeps running
+# Longer delay to allow network/DNS to stabilize
 Restart=always
-RestartSec=10
+RestartSec=30
 
 # Logging
 StandardOutput=journal

@@ -2,6 +2,7 @@ import aiohttp
 import logging
 import time
 import asyncio
+import socket
 from typing import Dict
 
 from api.kraken import get_historical_data
@@ -25,16 +26,66 @@ _cache_duration = 300  # Cache for 5 minutes (300 seconds) - reduces API calls s
 _last_known_prices: Dict[str, float] = {}
 
 
+def create_aiohttp_connector():
+    """
+    Create aiohttp connector with proper DNS and timeout settings.
+    
+    - Forces IPv4 for more reliable DNS resolution
+    - Caches DNS results to avoid repeated lookups
+    - Configures connection pooling
+    """
+    return aiohttp.TCPConnector(
+        family=socket.AF_INET,      # Force IPv4 for more reliable DNS
+        ttl_dns_cache=300,           # Cache DNS for 5 minutes
+        use_dns_cache=True,          # Enable DNS caching
+        limit=10,                    # Connection pool limit
+        limit_per_host=5,            # Connections per host
+        enable_cleanup_closed=True,  # Clean up closed connections
+        force_close=False,           # Reuse connections
+        ssl=None                     # Use default SSL context
+    )
+
+
+def create_client_timeout():
+    """
+    Create timeout configuration for aiohttp.
+    
+    Longer timeouts to handle slow DNS resolution and network issues.
+    """
+    return aiohttp.ClientTimeout(
+        total=30,          # Total timeout (30 seconds)
+        connect=10,        # Connection timeout (10 seconds)
+        sock_read=20,      # Socket read timeout (20 seconds)
+        sock_connect=10    # Socket connect timeout (10 seconds)
+    )
+
+
 async def _fetch_ticker(pair: str) -> dict | None:
+    """
+    Fetch ticker data with proper DNS and connection timeout handling.
+    """
     url = f"https://api.kraken.com/0/public/Ticker?pair={pair}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            response.raise_for_status()
-            data = await response.json()
-            if data.get('error'):
-                logger.error(f"Error fetching ticker for {pair}: {data['error']}")
-                return None
-            return data.get('result', {}).get(pair)
+    connector = create_aiohttp_connector()
+    timeout = create_client_timeout()
+    
+    try:
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                data = await response.json()
+                if data.get('error'):
+                    logger.error(f"Error fetching ticker for {pair}: {data['error']}")
+                    return None
+                return data.get('result', {}).get(pair)
+    except asyncio.TimeoutError:
+        logger.error(f"Timeout fetching ticker for {pair} (may be DNS or network issue)")
+        return None
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Connection error (likely DNS issue) for {pair}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error fetching ticker for {pair}: {e}")
+        return None
 
 
 async def fetch_initial_price(

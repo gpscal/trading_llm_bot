@@ -3,12 +3,48 @@ import hmac
 import hashlib
 import base64
 import aiohttp
+import asyncio
+import socket
 from urllib.parse import urlencode
 from config.config import CONFIG
 from tenacity import retry, stop_after_attempt, wait_fixed
 from utils.logger import setup_logger
 
 logger = setup_logger('kraken_api_logger', 'kraken_api.log')
+
+
+def create_aiohttp_connector():
+    """
+    Create aiohttp connector with proper DNS and timeout settings.
+    
+    - Forces IPv4 for more reliable DNS resolution
+    - Caches DNS results to avoid repeated lookups
+    - Configures connection pooling
+    """
+    return aiohttp.TCPConnector(
+        family=socket.AF_INET,      # Force IPv4 for more reliable DNS
+        ttl_dns_cache=300,           # Cache DNS for 5 minutes
+        use_dns_cache=True,          # Enable DNS caching
+        limit=10,                    # Connection pool limit
+        limit_per_host=5,            # Connections per host
+        enable_cleanup_closed=True,  # Clean up closed connections
+        force_close=False,           # Reuse connections
+        ssl=None                     # Use default SSL context
+    )
+
+
+def create_client_timeout():
+    """
+    Create timeout configuration for aiohttp.
+    
+    Longer timeouts to handle slow DNS resolution and network issues.
+    """
+    return aiohttp.ClientTimeout(
+        total=30,          # Total timeout (30 seconds)
+        connect=10,        # Connection timeout (10 seconds)
+        sock_read=20,      # Socket read timeout (20 seconds)
+        sock_connect=10    # Socket connect timeout (10 seconds)
+    )
 
 def get_signature(url_path, data, secret):
     postdata = urlencode(data)
@@ -33,8 +69,11 @@ async def get_balance():
     logger.info(f"Data: {data}")
     logger.info(f"Headers: {headers}")
 
+    connector = create_aiohttp_connector()
+    timeout = create_client_timeout()
+
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             async with session.post(url, headers=headers, data=data) as response:
                 # Read response once as JSON
                 response_json = await response.json()
@@ -67,16 +106,16 @@ async def get_historical_data(pair, interval):
     
     Implements exponential backoff for rate limit errors.
     """
-    import asyncio
-    
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
     
+    connector = create_aiohttp_connector()
+    timeout = create_client_timeout()
     max_retries = 3
     base_delay = 5  # Start with 5 seconds
     
     for attempt in range(max_retries):
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.get(url) as response:
                     data = await response.json()
                     
@@ -128,7 +167,10 @@ async def get_historical_data(pair, interval):
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def get_ticker(pair):
     url = f"https://api.kraken.com/0/public/Ticker?pair={pair}"
-    async with aiohttp.ClientSession() as session:
+    connector = create_aiohttp_connector()
+    timeout = create_client_timeout()
+    
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         async with session.get(url) as response:
             try:
                 data = await response.json()

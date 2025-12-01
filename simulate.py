@@ -27,16 +27,22 @@ def parse_args():
 
 async def main(initial_balance_usdt, initial_balance_sol, initial_balance_btc, selected_coin):
     try:
+        # Wait for network/DNS to be fully available at service startup
+        # This prevents "Could not contact DNS servers" errors
+        logger.info("Waiting 10 seconds for network and DNS to be fully available...")
+        await asyncio.sleep(10)
+        
         from utils.data_fetchers import fetch_initial_price
         from utils.coin_pair_manager import get_coin_pair_manager
         
         coin_manager = get_coin_pair_manager()
         selected_coin = coin_manager.validate_coin(selected_coin)
         
-        # Fetch initial prices for both coins
+        # Fetch initial prices with extended retry settings
+        # Using 5 retries with 5-second initial backoff (exponential: 5s, 10s, 20s, 40s, 80s)
         logger.info(f"Fetching initial prices for SOL and BTC...")
-        sol_price = await fetch_initial_price('SOL', prefer_usdt=False)
-        btc_price = await fetch_initial_price('BTC', prefer_usdt=True)
+        sol_price = await fetch_initial_price('SOL', retries=5, initial_backoff=5.0, prefer_usdt=False)
+        btc_price = await fetch_initial_price('BTC', retries=5, initial_backoff=5.0, prefer_usdt=True)
         
         if sol_price is None or btc_price is None:
             logger.error(f"Failed to fetch initial prices. SOL={sol_price}, BTC={btc_price}")
