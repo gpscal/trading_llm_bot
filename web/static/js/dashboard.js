@@ -733,9 +733,8 @@ function initializeEventListeners() {
                 name: document.getElementById('profile-name').value,
                 api_key: document.getElementById('api-key').value || null,
                 api_secret: document.getElementById('api-secret').value || null,
-                slack_webhook_url: document.getElementById('slack-webhook').value || null,
-                telegram_bot_token: document.getElementById('telegram-token').value || null,
-                telegram_chat_id: document.getElementById('telegram-chat-id').value || null
+                discord_bot_token: document.getElementById('discord-token').value || null,
+                discord_channel_id: document.getElementById('discord-channel-id').value || null
             };
             
             if (!formData.name) {

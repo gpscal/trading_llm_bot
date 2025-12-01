@@ -1,27 +1,24 @@
 """
-LLM Trading Advisor - Integrates LLM_trader with Trading LLM Bot
+LLM Trading Advisor - Uses local Ollama with DeepSeek-R1 for fast trading signals
 Provides LLM-based trading signals that complement existing indicators
 """
 import os
 import sys
 import asyncio
+import aiohttp
 import time
-from typing import Optional, Dict, Any, List, Tuple
+import re
+import json
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
-# Add parent directory to path for Trading LLM Bot imports (must be before LLM_trader)
+# Add parent directory to path for Trading LLM Bot imports
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# Import Trading LLM Bot utilities first
 from utils.logger import setup_logger
 from utils.shared_state import append_log_safe
-
-# Add LLM_trader to path (after Trading LLM Bot imports to avoid conflicts)
-llm_trader_path = os.path.join(os.path.dirname(__file__), '..', 'LLM_trader')
-if llm_trader_path not in sys.path:
-    sys.path.insert(0, llm_trader_path)
 
 logger = setup_logger('llm_advisor_logger', 'llm_advisor.log')
 
@@ -29,140 +26,156 @@ logger = setup_logger('llm_advisor_logger', 'llm_advisor.log')
 _llm_cache = {}
 _cache_duration = 600  # 10 minutes cache (increased from 5 to prevent rapid signal changes)
 _last_call_time = 0
-_min_call_interval = 300  # Minimum 5 minutes between calls (increased from 60s to align with cooldown)
+_min_call_interval = 300  # Minimum 5 minutes between calls (aligns with poll interval)
 
 
 class LLMAdvisor:
-    """LLM-based trading advisor that integrates with Trading LLM Bot"""
+    """LLM-based trading advisor using local Ollama with DeepSeek-R1"""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
         self.enabled = config.get('llm_enabled', False)
-        self.model_manager = None
-        self.prompt_builder = None
-        self.extractor = None
+        self.ollama_base_url = config.get('ollama_base_url', 'http://localhost:11434')
+        self.model = config.get('ollama_model', 'deepseek-r1:8b')
+        self.timeout = config.get('ollama_timeout', 120)  # 2 minutes for slower models
+        self._session = None
         self._initialized = False
         
         if self.enabled:
-            self._initialize_llm()
-    
-    def _initialize_llm(self):
-        """Lazy initialization of LLM components"""
-        if self._initialized:
-            return
-        
-        try:
-            llm_trader_dir = os.path.abspath(llm_trader_path)
-            
-            # CRITICAL: Change working directory to LLM_trader so relative imports work
-            # and add it to sys.path, removing conflicting paths
-            original_cwd = os.getcwd()
-            original_path = sys.path.copy()
-            
-            # Preserve all paths but reorder: LLM_trader first, remove Trading LLM Bot parent_dir
-            # Keep venv paths (site-packages) for dependencies
-            # Just reorder instead of replacing completely
-            
-            # Remove Trading LLM Bot parent_dir temporarily
-            if parent_dir in sys.path:
-                sys.path.remove(parent_dir)
-            
-            # Ensure LLM_trader is first
-            if llm_trader_dir in sys.path:
-                sys.path.remove(llm_trader_dir)
-            sys.path.insert(0, llm_trader_dir)
-            
-            try:
-                # Change to LLM_trader directory so relative imports resolve correctly
-                os.chdir(llm_trader_dir)
-                
-                # Clear any cached imports that might interfere
-                import importlib
-                modules_to_clear = [k for k in list(sys.modules.keys()) if any(x in k for x in ['core.', 'utils.', 'logger.'])]
-                for mod_name in modules_to_clear:
-                    if not mod_name.startswith('_'):
-                        try:
-                            del sys.modules[mod_name]
-                        except (KeyError, AttributeError):
-                            pass
-                
-                # Import LLM_trader utils modules using absolute paths to avoid conflicts
-                # We need to import them from LLM_trader's utils, not Trading LLM Bot's
-                import importlib.util
-                
-                # Load utils.dataclass first (model_manager needs it)
-                dataclass_path = os.path.join(llm_trader_dir, 'utils', 'dataclass.py')
-                spec = importlib.util.spec_from_file_location('llm_utils_dataclass', dataclass_path)
-                utils_dataclass_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(utils_dataclass_module)
-                sys.modules['utils.dataclass'] = utils_dataclass_module
-                
-                # Load utils.position_extractor
-                extractor_path = os.path.join(llm_trader_dir, 'utils', 'position_extractor.py')
-                spec = importlib.util.spec_from_file_location('llm_utils_position_extractor', extractor_path)
-                utils_extractor_module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(utils_extractor_module)
-                sys.modules['utils.position_extractor'] = utils_extractor_module
-                
-                # Now import core modules - they should be able to find utils modules
-                from core.model_manager import ModelManager
-                from core.trading_prompt import TradingPromptBuilder
-                from utils.position_extractor import PositionExtractor
-                from utils.dataclass import PromptContext, TechnicalSnapshot, MarketPeriod, MarketData, SentimentData, ResponseBuffer
-                from logger.logger import Logger as LLMLogger
-                
-                # Store classes for later use
-                self._ModelManager = ModelManager
-                self._TradingPromptBuilder = TradingPromptBuilder
-                self._PositionExtractor = PositionExtractor
-                self._LLMLogger = LLMLogger
-                self._PromptContext = PromptContext
-                self._TechnicalSnapshot = TechnicalSnapshot
-                self._MarketPeriod = MarketPeriod
-                self._MarketData = MarketData
-                self._SentimentData = SentimentData
-                self._ResponseBuffer = ResponseBuffer
-                
-                # Initialize ModelManager while still in LLM_trader directory
-                # ModelManager looks for config/model_config.ini relative to current directory
-                model_config_relative = 'config/model_config.ini'
-                if not os.path.exists(model_config_relative):
-                    raise FileNotFoundError(f"LLM model config file not found: {os.path.abspath(model_config_relative)}")
-                
-                # Initialize logger
-                llm_logger = LLMLogger(logger_name="LLMAdvisor", logger_debug=False)
-                
-                # ModelManager's config_path parameter is for the main config.ini file
-                main_config_path = 'config/config.ini'
-                config_path_to_pass = main_config_path if os.path.exists(main_config_path) else 'config'
-                
-                # Initialize ModelManager (MUST happen while in LLM_trader directory)
-                self.model_manager = ModelManager(llm_logger, config_path=config_path_to_pass)
-                self.prompt_builder = TradingPromptBuilder(llm_logger)
-                self.extractor = PositionExtractor()
-                
-            finally:
-                # Restore working directory and path AFTER ModelManager is initialized
-                os.chdir(original_cwd)
-                sys.path[:] = original_path
-                # Keep LLM_trader accessible for future use
-                if llm_trader_dir not in sys.path:
-                    sys.path.insert(0, llm_trader_dir)
-                if parent_dir not in sys.path:
-                    sys.path.insert(0, parent_dir)
-            
             self._initialized = True
-            logger.info("LLM Advisor initialized successfully")
-            
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            # Use module-level logger
-            from utils.logger import setup_logger as _setup_logger
-            _logger = _setup_logger('llm_advisor_logger', 'llm_advisor.log')
-            _logger.error(f"Failed to initialize LLM Advisor: {e}\n{error_details}")
-            self.enabled = False
-            self._initialized = False
+            logger.info(f"LLM Advisor initialized with Ollama model: {self.model} (timeout: {self.timeout}s)")
+    
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or create aiohttp session"""
+        if self._session is None or self._session.closed:
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
+    
+    def _build_trading_prompt(
+        self,
+        coin: str,
+        price: float,
+        indicators: Dict[str, Any],
+        balance_usdt: float,
+        balance_coin: float
+    ) -> str:
+        """Build a concise trading analysis prompt for the LLM"""
+        
+        # Extract key indicators
+        rsi = indicators.get('rsi', 50)
+        macd = indicators.get('macd', [0, 0])
+        macd_line = macd[0] if isinstance(macd, (list, tuple)) else 0
+        macd_signal = macd[1] if isinstance(macd, (list, tuple)) and len(macd) > 1 else 0
+        adx = indicators.get('adx', 20)
+        atr = indicators.get('atr', 0)
+        moving_avg = indicators.get('moving_avg', price)
+        momentum = indicators.get('momentum', 0)
+        obv = indicators.get('obv', 0)
+        
+        # Bollinger bands
+        bb = indicators.get('bollinger_bands', [price * 1.02, price * 0.98])
+        bb_upper = bb[0] if isinstance(bb, (list, tuple)) else price * 1.02
+        bb_lower = bb[1] if isinstance(bb, (list, tuple)) and len(bb) > 1 else price * 0.98
+        
+        # Stochastic
+        stoch = indicators.get('stochastic_oscillator', 50)
+        if isinstance(stoch, (list, tuple)):
+            stoch = stoch[0]
+        
+        prompt = f"""You are a cryptocurrency trading analyst. Analyze the following market data for {coin}/USD and provide a trading recommendation.
+
+CURRENT MARKET DATA:
+- Price: ${price:,.2f}
+- 14-period Moving Average: ${moving_avg:,.2f}
+- Price vs MA: {((price / moving_avg - 1) * 100):.2f}%
+
+TECHNICAL INDICATORS:
+- RSI (14): {rsi:.1f} (Oversold <30, Overbought >70)
+- MACD Line: {macd_line:.2f}
+- MACD Signal: {macd_signal:.2f}
+- MACD Histogram: {(macd_line - macd_signal):.2f}
+- ADX (Trend Strength): {adx:.1f} (Strong >25)
+- ATR (Volatility): ${atr:.2f}
+- Stochastic: {stoch:.1f}
+- OBV Trend: {"Positive" if obv > 0 else "Negative"}
+- Bollinger Upper: ${bb_upper:,.2f}
+- Bollinger Lower: ${bb_lower:,.2f}
+
+PORTFOLIO:
+- USDT Balance: ${balance_usdt:,.2f}
+- {coin} Holdings: {balance_coin:.6f} (${balance_coin * price:,.2f})
+
+Based on this analysis, provide your recommendation in the following exact format:
+
+SIGNAL: [BUY/SELL/HOLD]
+CONFIDENCE: [HIGH/MEDIUM/LOW]
+REASONING: [One sentence explanation]
+STOP_LOSS: [Price level or N/A]
+TAKE_PROFIT: [Price level or N/A]
+
+Important: Only output the recommendation in the format above. Be decisive - choose BUY, SELL, or HOLD based on the indicators."""
+
+        return prompt
+    
+    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
+        """Parse the LLM response to extract trading signal"""
+        result = {
+            'signal': 'HOLD',
+            'confidence': 'LOW',
+            'confidence_score': 0.2,
+            'reasoning': '',
+            'stop_loss': None,
+            'take_profit': None,
+            'full_analysis': response
+        }
+        
+        # Handle DeepSeek-R1's <think>...</think> tags - extract content after thinking
+        if '<think>' in response:
+            # Find content after </think> tag
+            think_end = response.find('</think>')
+            if think_end != -1:
+                response_to_parse = response[think_end + 8:].strip()
+            else:
+                response_to_parse = response
+        else:
+            response_to_parse = response
+        
+        # Extract SIGNAL
+        signal_match = re.search(r'SIGNAL:\s*(BUY|SELL|HOLD)', response_to_parse, re.IGNORECASE)
+        if signal_match:
+            result['signal'] = signal_match.group(1).upper()
+        
+        # Extract CONFIDENCE
+        confidence_match = re.search(r'CONFIDENCE:\s*(HIGH|MEDIUM|LOW)', response_to_parse, re.IGNORECASE)
+        if confidence_match:
+            confidence = confidence_match.group(1).upper()
+            result['confidence'] = confidence
+            confidence_map = {'HIGH': 0.8, 'MEDIUM': 0.5, 'LOW': 0.2}
+            result['confidence_score'] = confidence_map.get(confidence, 0.5)
+        
+        # Extract REASONING
+        reasoning_match = re.search(r'REASONING:\s*(.+?)(?=STOP_LOSS:|TAKE_PROFIT:|$)', response_to_parse, re.IGNORECASE | re.DOTALL)
+        if reasoning_match:
+            result['reasoning'] = reasoning_match.group(1).strip()[:500]
+        
+        # Extract STOP_LOSS
+        stop_loss_match = re.search(r'STOP_LOSS:\s*\$?([\d,]+\.?\d*)', response_to_parse, re.IGNORECASE)
+        if stop_loss_match:
+            try:
+                result['stop_loss'] = float(stop_loss_match.group(1).replace(',', ''))
+            except ValueError:
+                pass
+        
+        # Extract TAKE_PROFIT
+        take_profit_match = re.search(r'TAKE_PROFIT:\s*\$?([\d,]+\.?\d*)', response_to_parse, re.IGNORECASE)
+        if take_profit_match:
+            try:
+                result['take_profit'] = float(take_profit_match.group(1).replace(',', ''))
+            except ValueError:
+                pass
+        
+        return result
     
     async def get_trading_signal(
         self,
@@ -197,26 +210,23 @@ class LLMAdvisor:
         global _last_call_time
         current_time = time.time()
         
-        # Create cache key based on time bucket only (not price-sensitive)
-        # This allows reusing the same response for the cache duration regardless of small price changes
+        # Create cache key based on time bucket only
         time_bucket = int(current_time / _cache_duration)
         cache_key = f"llm_signal_{time_bucket}"
         time_since_last_call = current_time - _last_call_time
         
-        # Check cache first - if we have a recent response, use it
+        # Check cache first
         if cache_key in _llm_cache:
             cached_result = _llm_cache[cache_key]
             cache_age = current_time - cached_result['timestamp']
             if cache_age < _cache_duration:
                 logger.debug(f"Using cached LLM response (age: {cache_age:.1f}s)")
-                # Mark result as cached so trade logic knows not to recheck stability
                 result = cached_result['result'].copy()
                 result['is_cached'] = True
                 return result
         
-        # Enforce minimum call interval - but still return cached signal if available
+        # Enforce minimum call interval
         if time_since_last_call < _min_call_interval:
-            # Check if we have ANY recent cached result (not just current time bucket)
             for key, cached_data in _llm_cache.items():
                 cache_age = current_time - cached_data['timestamp']
                 if cache_age < _cache_duration:
@@ -225,50 +235,68 @@ class LLMAdvisor:
                     result['is_cached'] = True
                     return result
             
-            # No cache available and throttled - return None
-            logger.info(f"LLM call throttled (minimum {_min_call_interval}s interval, {time_since_last_call:.1f}s since last call), no cache available")
+            logger.info(f"LLM call throttled (minimum {_min_call_interval}s interval, {time_since_last_call:.1f}s since last call)")
             return None
         
         try:
-            # Build prompt context from Trading LLM Bot data
-            logger.debug(f"Building LLM prompt context for {selected_coin}...")
-            prompt_context = self._build_prompt_context(
-                sol_price, btc_price, btc_indicators, sol_indicators,
-                balance_usdt, balance_sol, sol_historical, btc_historical,
-                selected_coin=selected_coin
-            )
+            # Select appropriate data based on coin
+            selected_coin = selected_coin.upper()
+            if selected_coin == 'BTC':
+                price = btc_price
+                indicators = btc_indicators
+                balance_coin = balance_sol  # This is actually the BTC balance passed in
+            else:
+                price = sol_price
+                indicators = sol_indicators
+                balance_coin = balance_sol
             
             # Build prompt
-            logger.debug("Building LLM prompt...")
-            prompt = self.prompt_builder.build_prompt(prompt_context)
+            prompt = self._build_trading_prompt(
+                coin=selected_coin,
+                price=price,
+                indicators=indicators,
+                balance_usdt=balance_usdt,
+                balance_coin=balance_coin
+            )
             
-            # Update last call time BEFORE making the call to prevent rapid retries
+            # Update last call time BEFORE making the call
             _last_call_time = current_time
-            logger.info(f"Calling LLM for trading analysis... (last call was {time_since_last_call:.1f}s ago)")
+            logger.info(f"Calling Ollama ({self.model}) for {selected_coin} trading analysis...")
             
-            # Use stored ResponseBuffer from initialization
-            ResponseBuffer = self._ResponseBuffer
-            buffer = ResponseBuffer()
-            logger.debug("Sending prompt to LLM model...")
-            analysis = await self.model_manager.send_prompt(prompt, buffer)
+            # Call Ollama API
+            session = await self._get_session()
             
-            # Extract trading signal from LLM response
-            signal, confidence_str, stop_loss, take_profit, position_size = self.extractor.extract_trading_info(analysis)
-            
-            # Convert confidence string to score
-            confidence_map = {'HIGH': 0.8, 'MEDIUM': 0.5, 'LOW': 0.2}
-            confidence_score = confidence_map.get(confidence_str, 0.5)
-            
-            result = {
-                'signal': signal,
-                'confidence': confidence_str,
-                'confidence_score': confidence_score,
-                'reasoning': analysis[:500],  # First 500 chars of reasoning
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'full_analysis': analysis,
-                'is_cached': False  # Fresh signal from LLM
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,  # Lower temperature for more consistent responses
+                    "num_predict": 500   # Limit response length
+                }
             }
+            
+            start_time = time.time()
+            async with session.post(
+                f"{self.ollama_base_url}/api/generate",
+                json=payload
+            ) as response:
+                elapsed = time.time() - start_time
+                
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Ollama API error (status {response.status}): {error_text[:200]}")
+                    return None
+                
+                data = await response.json()
+                llm_response = data.get('response', '')
+                
+                logger.info(f"Ollama response received in {elapsed:.1f}s")
+                logger.debug(f"Raw LLM response: {llm_response[:500]}...")
+            
+            # Parse response
+            result = self._parse_llm_response(llm_response)
+            result['is_cached'] = False
             
             # Cache result
             _llm_cache[cache_key] = {
@@ -279,155 +307,20 @@ class LLMAdvisor:
             # Clean old cache entries
             self._clean_cache()
             
-            logger.info(f"LLM Signal for {selected_coin}: {signal}, Confidence: {confidence_str} ({confidence_score:.2f})")
-            append_log_safe(f"LLM [{selected_coin}]: {signal} ({confidence_str}, score: {confidence_score:.2f})")
+            logger.info(f"LLM Signal for {selected_coin}: {result['signal']}, Confidence: {result['confidence']} ({result['confidence_score']:.2f})")
+            append_log_safe(f"LLM [{selected_coin}]: {result['signal']} ({result['confidence']}, score: {result['confidence_score']:.2f})")
             
             return result
             
+        except asyncio.TimeoutError:
+            logger.error(f"Ollama request timed out after {self.timeout}s")
+            return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Ollama connection error: {e}")
+            return None
         except Exception as e:
             logger.error(f"Error getting LLM trading signal: {e}", exc_info=True)
             return None
-    
-    def _build_prompt_context(
-        self,
-        sol_price: float,
-        btc_price: float,
-        btc_indicators: Dict[str, Any],
-        sol_indicators: Dict[str, Any],
-        balance_usdt: float,
-        balance_sol: float,
-        sol_historical: Optional[List] = None,
-        btc_historical: Optional[List] = None,
-        selected_coin: str = 'SOL'
-    ):
-        """Build LLM prompt context from Trading LLM Bot data structures"""
-        # Use stored classes from initialization
-        PromptContext = self._PromptContext
-        TechnicalSnapshot = self._TechnicalSnapshot
-        MarketPeriod = self._MarketPeriod
-        MarketData = self._MarketData
-        SentimentData = self._SentimentData
-        
-        # Select the appropriate indicators and price based on selected_coin
-        selected_coin = selected_coin.upper()
-        if selected_coin == 'BTC':
-            primary_indicators = btc_indicators
-            primary_price = btc_price
-            primary_balance = balance_sol  # Note: This is actually the coin balance, not specifically SOL
-            symbol = "BTC/USD"
-        else:  # Default to SOL
-            primary_indicators = sol_indicators
-            primary_price = sol_price
-            primary_balance = balance_sol
-            symbol = "SOL/USD"
-        
-        logger.debug(f"Building prompt context for {symbol} (price: {primary_price})")
-        
-        # Skip OHLCV candles for now - the LLM works fine without detailed candle data
-        # The technical indicators provide sufficient market context
-        ohlcv_candles = None
-        logger.debug("Skipping OHLCV candles (using indicators only)")
-        
-        # Build technical snapshot from indicators
-        try:
-            # Safely extract bollinger bands
-            bb_bands = primary_indicators.get('bollinger_bands')
-            if bb_bands and isinstance(bb_bands, (list, tuple)) and len(bb_bands) >= 3:
-                bb_upper, bb_middle, bb_lower = float(bb_bands[0]), float(bb_bands[1]), float(bb_bands[2])
-            else:
-                bb_upper, bb_middle, bb_lower = primary_price * 1.02, primary_price, primary_price * 0.98
-            
-            # Safely extract MACD
-            macd = primary_indicators.get('macd')
-            if macd and isinstance(macd, (list, tuple)) and len(macd) >= 2:
-                macd_line, macd_signal = float(macd[0]), float(macd[1])
-                macd_hist = macd_line - macd_signal
-            else:
-                macd_line, macd_signal, macd_hist = 0.0, 0.0, 0.0
-            
-            # Safely extract stochastic
-            stoch = primary_indicators.get('stochastic_oscillator')
-            if stoch and isinstance(stoch, (list, tuple)) and len(stoch) >= 2:
-                stoch_k, stoch_d = float(stoch[0]), float(stoch[1])
-            else:
-                stoch_k, stoch_d = 50.0, 50.0
-            
-            technical_snapshot = TechnicalSnapshot(
-                vwap_5m=float(primary_indicators.get('vwap', primary_price)),
-                twap=float(primary_indicators.get('twap', primary_price)),
-                mfi_14=float(primary_indicators.get('mfi', 50.0)),
-                obv=float(primary_indicators.get('obv', 0)),
-                cmf=float(primary_indicators.get('cmf', 0)),
-                force_index=float(primary_indicators.get('force_index', 0)),
-                
-                rsi_5m_14=float(primary_indicators.get('rsi', 50.0)),
-                macd_line=macd_line,
-                macd_signal=macd_signal,
-                macd_hist=macd_hist,
-                stoch_k=stoch_k,
-                stoch_d=stoch_d,
-                williams_r=float(primary_indicators.get('williams_r', -50)),
-                
-                adx=float(primary_indicators.get('adx', 20)),
-                plus_di=float(primary_indicators.get('plus_di', 20)),
-                minus_di=float(primary_indicators.get('minus_di', 20)),
-                supertrend=float(primary_price),  # Simplified
-                supertrend_direction=1.0,
-                psar=float(primary_price),  # Simplified
-                
-                atr_5m_14=float(primary_indicators.get('atr', primary_price * 0.02)),
-                bb_upper=bb_upper,
-                bb_middle=bb_middle,
-                bb_lower=bb_lower,
-                
-                hurst=0.5,  # Not calculated in Trading LLM Bot
-                kurtosis=0.0,  # Not calculated in Trading LLM Bot
-                zscore=0.0  # Not calculated in Trading LLM Bot
-            )
-        except Exception as e:
-            logger.warning(f"Error building technical snapshot for {selected_coin}: {e}", exc_info=True)
-            # Fallback minimal snapshot
-            technical_snapshot = TechnicalSnapshot(
-                vwap_5m=primary_price, twap=primary_price, mfi_14=50, obv=0, cmf=0, force_index=0,
-                rsi_5m_14=primary_indicators.get('rsi', 50), macd_line=0, macd_signal=0, macd_hist=0,
-                stoch_k=50, stoch_d=50, williams_r=-50,
-                adx=20, plus_di=20, minus_di=20, supertrend=primary_price, supertrend_direction=1.0, psar=primary_price,
-                atr_5m_14=primary_price * 0.02, bb_upper=primary_price, bb_middle=primary_price, bb_lower=primary_price,
-                hurst=0.5, kurtosis=0.0, zscore=0.0
-            )
-        
-        # Build market periods with proper metrics
-        # Create minimal MarketData entries for metrics calculation
-        current_market_data = MarketData(
-            timestamp=datetime.now(),
-            open=primary_price,
-            high=primary_price * 1.01,  # Estimate
-            low=primary_price * 0.99,   # Estimate
-            close=primary_price,
-            volume=1000000.0  # Estimate
-        )
-        
-        # Create periods with data (MarketPeriod calculates metrics from data)
-        market_metrics = {
-            '1D': MarketPeriod(data=[current_market_data] * 48, period_name='1D'),  # 48 hours
-            '2D': MarketPeriod(data=[current_market_data] * 72, period_name='2D'),  # 72 hours
-            '3D': MarketPeriod(data=[current_market_data] * 730, period_name='3D')  # 730 hours (~1 month)
-        }
-        
-        # Build context
-        context = PromptContext(
-            symbol=symbol,
-            current_price=primary_price,
-            ohlcv_candles=ohlcv_candles,
-            technical_data=technical_snapshot,
-            market_metrics=market_metrics,
-            current_position=None,  # Trading LLM Bot doesn't track positions in this format
-            sentiment=None,  # Optional - could fetch Fear & Greed Index
-            trade_history=[],
-            previous_response=""
-        )
-        
-        return context
     
     def _clean_cache(self):
         """Remove old cache entries"""
@@ -441,9 +334,9 @@ class LLMAdvisor:
             del _llm_cache[k]
     
     async def close(self):
-        """Cleanup LLM resources"""
-        if self.model_manager:
-            await self.model_manager.close()
+        """Cleanup resources"""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
 
 # Global instance

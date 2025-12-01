@@ -8,8 +8,6 @@ from utils.shared_state import append_log_safe
 # ML import is lazy-loaded to avoid circular dependencies
 
 # Import notifiers and signal tracker
-from utils.telegram_notifier import get_telegram_notifier
-from utils.whatsapp_notifier import get_whatsapp_notifier
 from utils.discord_notifier import get_discord_notifier
 from utils.signal_tracker import get_signal_tracker
 
@@ -460,8 +458,6 @@ async def handle_trade_with_fees(
                 
                 # Only update signal tracking and check stability for FRESH signals
                 signal_tracker = get_signal_tracker()
-                telegram = get_telegram_notifier()
-                whatsapp = get_whatsapp_notifier()
                 
                 if not is_cached:
                     # Fresh signal - update tracking and check stability
@@ -496,34 +492,7 @@ async def handle_trade_with_fees(
                     # Send signal change notifications if signal changed
                     if signal_changed and old_signal:
                         logger.info(f"Signal changed for {trade_coin}: {old_signal} → {llm_signal_str}")
-                        # Send notifications with LLM feedback and Deep Analysis
-                        try:
-                            telegram.send_signal_change_alert(
-                                coin=trade_coin,
-                                old_signal=old_signal,
-                                new_signal=llm_signal_str,
-                                price=primary_price,
-                                confidence=confidence,
-                                llm_signal=llm_signal,
-                                deep_analysis=deep_analysis if deep_analysis else None
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to send Telegram signal change notification: {e}")
-                        
-                        try:
-                            whatsapp.send_signal_change_alert(
-                                coin=trade_coin,
-                                old_signal=old_signal,
-                                new_signal=llm_signal_str,
-                                price=primary_price,
-                                confidence=confidence,
-                                llm_signal=llm_signal,
-                                deep_analysis=deep_analysis if deep_analysis else None
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to send WhatsApp signal change notification: {e}")
-                        
-                        # Discord notification (async)
+                        # Send Discord notification
                         try:
                             import asyncio
                             discord_notifier = await get_discord_notifier()
@@ -770,36 +739,7 @@ async def handle_trade_with_fees(
             primary_state['position_entry_price'] = primary_price
             primary_state['trailing_high_price'] = primary_price
         
-        # Send notifications for trade execution
-        try:
-            telegram = get_telegram_notifier()
-            telegram.send_trade_execution_alert(
-                coin=trade_coin,
-                action=trade_action.upper(),
-                amount=volume,
-                price=primary_price,
-                total_value=volume * primary_price,
-                balance_usdt=balance_usdt,
-                balance_coin=balance_coin_amount
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send Telegram trade notification: {e}")
-        
-        try:
-            whatsapp = get_whatsapp_notifier()
-            whatsapp.send_trade_execution_alert(
-                coin=trade_coin,
-                action=trade_action.upper(),
-                amount=volume,
-                price=primary_price,
-                total_value=volume * primary_price,
-                balance_usdt=balance_usdt,
-                balance_coin=balance_coin_amount
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send WhatsApp trade notification: {e}")
-        
-        # Discord notification for trade execution (async)
+        # Send Discord notification for trade execution
         try:
             import asyncio
             discord_notifier = await get_discord_notifier()

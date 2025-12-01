@@ -195,29 +195,6 @@ class DeepAnalyzer:
             append_log_safe(f"?? Deep Analysis [{symbol}]: {result.recommended_action} "
                           f"({result.confidence:.0%} confidence, {result.trend})")
             
-            # Send WhatsApp notification with analysis report
-            try:
-                from utils.whatsapp_notifier import get_whatsapp_notifier
-                whatsapp = get_whatsapp_notifier()
-                
-                if whatsapp.enabled:
-                    # Extract coin from symbol (e.g., "BTC/USD" -> "BTC")
-                    coin = symbol.split('/')[0] if '/' in symbol else symbol
-                    
-                    # Send report
-                    sent = whatsapp.send_deep_analysis_report(
-                        coin=coin,
-                        price=current_price,
-                        analysis=result.to_dict()
-                    )
-                    
-                    if sent:
-                        logger.info(f"📱 Deep analysis report sent to WhatsApp for {symbol}")
-                    else:
-                        logger.debug("WhatsApp notification not sent (may be disabled)")
-            except Exception as e:
-                logger.warning(f"Failed to send WhatsApp notification: {e}")
-            
             # Send Discord notification with analysis report
             try:
                 from utils.discord_notifier import get_discord_notifier

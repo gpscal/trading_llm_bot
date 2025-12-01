@@ -23,9 +23,8 @@ with profiles_col1:
     profile_name = st.text_input("Profile Name", key="profile_name")
     api_key = st.text_input("Kraken API Key", type="password")
     api_secret = st.text_input("Kraken API Secret", type="password")
-    slack_webhook_url = st.text_input("Slack Webhook URL", type="password")
-    telegram_bot_token = st.text_input("Telegram Bot Token", type="password")
-    telegram_chat_id = st.text_input("Telegram Chat ID", type="password")
+    discord_bot_token = st.text_input("Discord Bot Token", type="password")
+    discord_channel_id = st.text_input("Discord Channel ID", type="password")
     if st.button("Save Profile"):
         if not profile_name:
             st.error("Please provide a profile name.")
@@ -34,9 +33,8 @@ with profiles_col1:
                 'name': profile_name,
                 'api_key': api_key or None,
                 'api_secret': api_secret or None,
-                'slack_webhook_url': slack_webhook_url or None,
-                'telegram_bot_token': telegram_bot_token or None,
-                'telegram_chat_id': telegram_chat_id or None
+                'discord_bot_token': discord_bot_token or None,
+                'discord_channel_id': discord_channel_id or None
             }
             try:
                 r = requests.post("http://localhost:5000/save_profile", json=payload, timeout=10)

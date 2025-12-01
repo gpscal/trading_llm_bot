@@ -8,9 +8,8 @@ PROFILES_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'config
 SENSITIVE_KEYS = [
     'api_key',
     'api_secret',
-    'slack_webhook_url',
-    'telegram_bot_token',
-    'telegram_chat_id'
+    'discord_bot_token',
+    'discord_channel_id'
 ]
 
 def _ensure_dir_exists(path: str) -> None:
@@ -49,15 +48,12 @@ def apply_profile(name: str) -> Dict[str, Any]:
         elif k == 'api_secret':
             os.environ['API_SECRET'] = str(v)
             CONFIG['api_secret'] = str(v)
-        elif k == 'slack_webhook_url':
-            os.environ['SLACK_WEBHOOK_URL'] = str(v)
-            CONFIG['slack_webhook_url'] = str(v)
-        elif k == 'telegram_bot_token':
-            os.environ['TELEGRAM_BOT_TOKEN'] = str(v)
-            CONFIG['telegram_bot_token'] = str(v)
-        elif k == 'telegram_chat_id':
-            os.environ['TELEGRAM_CHAT_ID'] = str(v)
-            CONFIG['telegram_chat_id'] = str(v)
+        elif k == 'discord_bot_token':
+            os.environ['DISCORD_BOT_TOKEN'] = str(v)
+            CONFIG['discord_bot_token'] = str(v)
+        elif k == 'discord_channel_id':
+            os.environ['DISCORD_CHANNEL_ID'] = str(v)
+            CONFIG['discord_channel_id'] = str(v)
     return profile
 
 def mask_value(value: str) -> str:

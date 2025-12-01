@@ -15,8 +15,10 @@ gunicorn
 eventlet
 # GPU acceleration (optional - install with install_gpu_dependencies.sh)
 # cupy-cuda11x or cupy-cuda12x  # Uncomment and choose based on CUDA version
-# torch  # Install from PyTorch website with CUDA support
-# scikit-learn
+
+# PyTorch for ML models (CPU version - use install_gpu_dependencies.sh for CUDA)
+torch
+scikit-learn
 
 # LLM Trading Advisor dependencies (for LLM_trader integration)
 ccxt>=4.4.52
@@ -26,8 +28,7 @@ numba>=0.61.0
 scipy>=1.15.1
 openai>=1.61.0
 
-# WhatsApp notifications via Twilio
-twilio>=9.0.0
+# Discord notifications
 discord.py>=2.6.0
 pyjwt>=2.8.0
 cryptography>=41.0.0

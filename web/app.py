@@ -260,9 +260,8 @@ def save_profile_route():
     values = {
         'api_key': data.get('api_key'),
         'api_secret': data.get('api_secret'),
-        'slack_webhook_url': data.get('slack_webhook_url'),
-        'telegram_bot_token': data.get('telegram_bot_token'),
-        'telegram_chat_id': data.get('telegram_chat_id'),
+        'discord_bot_token': data.get('discord_bot_token'),
+        'discord_channel_id': data.get('discord_channel_id'),
     }
     save_profile(name, values)
     return jsonify({'status': 'saved'})

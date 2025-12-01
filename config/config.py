@@ -42,58 +42,32 @@ CONFIG = {
     'cooldown_period': 300,  # 5 minutes between trades
     'api_key': os.getenv('API_KEY'),
     'api_secret': os.getenv('API_SECRET'),
-    'api_passphrase': os.getenv('API_PASSPHRASE'),  # For OKX
     
-    # Exchange Configuration (Kraken)
-    'exchange': 'kraken',  # Current exchange: 'kraken', 'okx', 'coinbase', or 'bybit'
+    # Exchange Configuration (Kraken only)
+    'exchange': 'kraken',
     
     # Kraken URLs
     'base_url': 'https://api.kraken.com',
     'websocket_url': 'wss://ws.kraken.com/',
     
-    # Other exchanges (not currently in use)
-    'okx_base_url': 'https://www.okx.com',
-    
-    # Coinbase (had API key issues)
-    'coinbase_base_url': 'https://api.coinbase.com',
-    
-    # Bybit (not available in Canada)
-    'bybit_base_url': 'https://api.bybit.com',
-    'bybit_testnet_url': 'https://api-testnet.bybit.com',
-    
     'coin_pairs': {
         'SOL': {
-            # Kraken format (current)
             'rest': 'SOLUSDT',
             'rest_alt': 'SOLUSD',
             'websocket': 'SOL/USD',
             'symbol': 'SOL',
-            # OKX format
-            'okx_rest': 'SOL-USDT',
-            # Coinbase format
-            'coinbase_rest': 'SOL-USD',
-            # Bybit format
-            'bybit_rest': 'SOLUSDT',
         },
         'BTC': {
-            # Kraken format (current)
             'rest': 'XXBTZUSD',
             'rest_alt': 'XBTUSDT',
             'websocket': 'XBT/USD',
             'symbol': 'XBT',
-            # OKX format
-            'okx_rest': 'BTC-USDT',
-            # Coinbase format
-            'coinbase_rest': 'BTC-USD',
-            # Bybit format
-            'bybit_rest': 'BTCUSDT',
         },
     },
-    # Alerts/notifications
+    # Alerts/notifications (Discord only)
     'alerts_enabled': True,
-    'slack_webhook_url': os.getenv('SLACK_WEBHOOK_URL'),
-    'telegram_bot_token': os.getenv('TELEGRAM_BOT_TOKEN'),
-    'telegram_chat_id': os.getenv('TELEGRAM_CHAT_ID'),
+    'discord_bot_token': os.getenv('DISCORD_BOT_TOKEN'),
+    'discord_channel_id': os.getenv('DISCORD_CHANNEL_ID'),
     'ma_period': 14,
     'bb_period': 14,
     'macd_fast_period': 12,
@@ -149,14 +123,18 @@ CONFIG = {
     'profitability_boost_weight': 0.2,  # Reduced influence (was 0.4)
     'min_profitability_threshold': 0.0,  # Disabled threshold (was 0.3) - model needs retraining with better data
     
-    # LLM Trading Advisor settings (integrates LLM_trader for AI-powered trading signals)
-    'llm_enabled': True,  # Enable LLM advisor (requires API key configuration)
+    # LLM Trading Advisor settings (uses local Ollama with DeepSeek-R1)
+    'llm_enabled': True,  # Enable LLM advisor
     'llm_final_authority': True,  # Give LLM final veto power - if HOLD, no trade happens
     'llm_confidence_weight': 0.25,  # How much LLM signal contributes to trade decision (0.0-1.0)
-    'llm_model_config_path': 'LLM_trader/config/model_config.ini',  # Path to LLM model config
     'llm_signal_stability_required': True,  # Require consecutive agreeing signals before trading
     'llm_signal_stability_count': 2,  # Number of consecutive agreeing signals required (2-3 recommended)
     'llm_consensus_required': True,  # Require BOTH Fast LLM and Deep Analysis to agree (BUY or SELL)
+    
+    # Ollama Fast LLM settings
+    'ollama_base_url': os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'),  # Ollama API URL
+    'ollama_model': os.getenv('OLLAMA_MODEL', 'deepseek-r1:8b'),  # Fast LLM model
+    'ollama_timeout': 120,  # 2 minutes timeout for model response (DeepSeek-R1:8b is slower)
     
     # Deep Analysis settings (comprehensive analysis using Claude AI + RAG)
     'deep_analysis_enabled': True,  # Enable deep analyzer for comprehensive market context

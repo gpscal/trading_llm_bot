@@ -4,6 +4,12 @@ __pycache__/
 *$py.class
 *.pyc
 
+# Directories
+docs/
+logs/
+models/
+test/
+
 # Environments
 docs/
 .env

@@ -1,6 +1,6 @@
 # Trading LLM Bot
 
-An advanced AI-powered cryptocurrency trading bot that combines traditional technical analysis with cutting-edge LLM (Large Language Model) intelligence for automated trading on multiple exchanges. Originally designed for Solana (SOL) trading, the bot has evolved to support multi-coin trading including Bitcoin (BTC) and Solana (SOL).
+An advanced AI-powered cryptocurrency trading bot that combines traditional technical analysis with cutting-edge LLM (Large Language Model) intelligence for automated trading on Kraken. Originally designed for Solana (SOL) trading, the bot has evolved to support multi-coin trading including Bitcoin (BTC) and Solana (SOL).
 
 ## 🚀 Key Features
 
@@ -10,9 +10,9 @@ An advanced AI-powered cryptocurrency trading bot that combines traditional tech
 - **Machine Learning Models:** Price prediction and profitability forecasting using PyTorch
 - **News Sentiment Analysis:** Real-time cryptocurrency news analysis from CryptoCompare and NewsAPI.ai
 
-### Multi-Coin & Multi-Exchange Support
+### Multi-Coin Support
 - **Trading Pairs:** BTC/USD, SOL/USD (easily extensible to other coins)
-- **Exchange Support:** Kraken (primary), OKX, Coinbase, Bybit
+- **Exchange:** Kraken (only supported exchange)
 - **Real-time Data:** WebSocket connections for live market data streaming
 - **REST API Integration:** Fallback and historical data fetching
 
@@ -32,7 +32,7 @@ An advanced AI-powered cryptocurrency trading bot that combines traditional tech
 ### Real-Time Monitoring
 - **Web Dashboard:** Beautiful, responsive HTML/CSS/JavaScript dashboard with live updates
 - **WebSocket Integration:** Real-time trade notifications and status updates
-- **Multi-Platform Alerts:** Discord, WhatsApp, and Telegram notifications
+- **Discord Notifications:** Real-time alerts and trade notifications via Discord
 - **Comprehensive Logging:** Detailed logs for all operations, trades, and system events
 
 ### Production-Ready
@@ -67,26 +67,24 @@ An advanced AI-powered cryptocurrency trading bot that combines traditional tech
    Create a `.env` file in the root directory with the following variables:
 
    ```env
-   # Exchange API Credentials (Kraken - primary)
+   # Kraken API Credentials (only supported exchange)
    API_KEY=your_kraken_api_key
    API_SECRET=your_kraken_api_secret
-   
-   # Optional: Other exchanges
-   API_PASSPHRASE=your_okx_api_passphrase  # For OKX
    
    # AI/LLM Configuration
    ANTHROPIC_API_KEY=your_anthropic_api_key  # For Claude AI
    ANTHROPIC_MODEL=claude-3-5-sonnet-20241022  # Claude model
    OPENROUTER_API_KEY=your_openrouter_key  # Fallback LLM provider
+   OLLAMA_BASE_URL=http://localhost:11434  # Local Ollama instance
+   OLLAMA_MODEL=deepseek-r1:8b  # Fast LLM model
    
    # News APIs
    CRYPTOCOMPARE_API_KEY=your_cryptocompare_key  # Primary news source
    NEWS_API_AI=your_newsapi_key  # Fallback news source
    
-   # Notifications (Optional)
-   TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-   TELEGRAM_CHAT_ID=your_telegram_chat_id
-   SLACK_WEBHOOK_URL=your_slack_webhook
+   # Discord Notifications (only notification service)
+   DISCORD_BOT_TOKEN=your_discord_bot_token
+   DISCORD_CHANNEL_ID=your_discord_channel_id
    
    # Trading Configuration
    DEFAULT_COIN=SOL  # Default coin to trade (SOL or BTC)
@@ -360,10 +358,7 @@ tmux attach -t trading-bot-sim
 ```
 trading_llm_bot/
 ├── api/                              # Exchange API integrations
-│   ├── kraken.py                     # Kraken exchange (primary)
-│   ├── okx.py                        # OKX exchange
-│   ├── coinbase.py                   # Coinbase exchange
-│   ├── bybit.py                      # Bybit exchange
+│   ├── kraken.py                     # Kraken exchange (only supported exchange)
 │   └── websocket.py                  # WebSocket connections
 ├── config/
 │   ├── config.py                     # Main configuration
@@ -385,13 +380,11 @@ trading_llm_bot/
 │   ├── trade_logic.py                # Trading decision engine
 │   └── volume_calculator.py          # Position sizing
 ├── utils/                            # Utility modules
-│   ├── balance.py                    # Multi-exchange balance management
+│   ├── balance.py                    # Kraken balance management
 │   ├── coin_pair_manager.py          # Trading pair mapping
 │   ├── data_fetchers.py              # Historical data fetching
 │   ├── trading_orchestrator.py       # Unified trading loop
-│   ├── discord_notifier.py           # Discord notifications
-│   ├── whatsapp_notifier.py          # WhatsApp notifications
-│   ├── telegram_notifier.py          # Telegram notifications
+│   ├── discord_notifier.py           # Discord notifications (only notification service)
 │   └── [15+ utility modules]
 ├── web/                              # Web dashboard
 │   ├── app.py                        # Flask application
@@ -480,10 +473,10 @@ The bot's behavior can be extensively customized through `config/config.py`:
 - **ML Models:** Enable/disable ML price prediction
 - **News Sentiment:** Toggle news analysis integration
 
-### Exchange Selection
-- Set `exchange` in config to: `kraken`, `okx`, `coinbase`, or `bybit`
-- Configure appropriate API credentials in `.env`
-- Each exchange has custom pair mappings and endpoints
+### Exchange Configuration
+- Only Kraken exchange is supported
+- Configure Kraken API credentials in `.env`
+- Kraken-specific pair mappings are configured in `config/config.py`
 
 ### Indicator Weights
 Fine-tune how much each indicator contributes to trade decisions:
@@ -505,23 +498,23 @@ Fine-tune how much each indicator contributes to trade decisions:
 The project includes comprehensive test suites:
 
 ```bash
-# Test exchange connections
-python test_kraken_connection.py
-python test_coinbase_connection.py
-python test_okx_connection.py
-python test_bybit_connection.py
+# Test Kraken connection
+python diagnose_kraken.py
 
 # Test LLM integration
 python test_llm_advisor.py
 python test_deep_analyzer.py
+python test_ollama_connection.py
 
-# Test notifications
+# Test Discord notifications
 python test_discord_analysis.py
-python test_telegram_notifications.py
-python test_whatsapp_notifications.py
+python test_all_discord_notifications.py
 
 # Test ML models
 python test_deep_analyzer_model.py
+
+# Run unit tests
+pytest
 ```
 
 ## Performance Monitoring
